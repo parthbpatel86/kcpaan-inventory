@@ -7,3 +7,7 @@ backend/__pycache__/
 .DS_Store
 app/.expo/
 app/dist/
+KCPaan-POS-*.apk
+app/android/
+app/ios/
+app/.expo/
