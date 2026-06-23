@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "KC Paan POS",
+    "slug": "kcpaan-inventory",
+    "scheme": "kcpaanpos",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.kcpaan.pos"
+    },
+    "android": {
+      "package": "com.kcpaan.pos",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#0F7B5A",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar"
+    ],
+    "extra": {
+      "apiUrl": "https://kcpaan-inventory-api.onrender.com",
+      "eas": {
+        "projectId": ""
+      }
+    }
+  }
+}
