@@ -1,0 +1,397 @@
+{
+  "replace": true,
+  "items": [
+    {
+      "name": "120 Plus",
+      "price": 20.0,
+      "shop_qty": 39,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://hookah1.com/cdn/shop/products/BabaSilver10gm_600x.jpg?v=1598053211"
+    },
+    {
+      "name": "600 Pouch",
+      "price": 21.0,
+      "shop_qty": 3,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://hookah1.com/cdn/shop/products/Baba600_H1-500x500_149466f2-b339-41a2-b587-e6a9ef64be43_600x.jpg?v=1562435378"
+    },
+    {
+      "name": "7 Up Star Sopari Silver",
+      "price": 6.0,
+      "shop_qty": 17,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://worldfoodz.com/cdn/shop/files/745125960067.webp?v=1771806476&width=1500"
+    },
+    {
+      "name": "90 Nauratan Qiwam Small",
+      "price": 10.0,
+      "shop_qty": 25,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://hookah1.com/cdn/shop/products/baba_quiwam-500x500-warning_600x.jpg?v=1562430518"
+    },
+    {
+      "name": "90 Qiwam Baba Nauratan",
+      "price": 42.0,
+      "shop_qty": 0,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://smokekart.in/cdn/shop/files/baba-qiwam-90-min.png?v=1752518758&width=2000"
+    },
+    {
+      "name": "Baba 120 No Silver",
+      "price": 11.0,
+      "shop_qty": 10,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://www.gutkhausa.com/cdn/shop/files/5.jpg?v=1769825682&width=800"
+    },
+    {
+      "name": "Baba 120 Silver",
+      "price": 14.0,
+      "shop_qty": 10,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://cdn11.bigcommerce.com/s-i4e9d/images/stencil/1280x1280/products/1378/2697/Baba120silverpremium__57157.1765990091.jpg?c=2"
+    },
+    {
+      "name": "Baba 120 Small",
+      "price": 4.0,
+      "shop_qty": 15,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://cdn.quicklly.com/upload_images/product/1691783456-baba-120-pouch.jpg"
+    },
+    {
+      "name": "Baba 160",
+      "price": 23.0,
+      "shop_qty": 21,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://hookah1.com/cdn/shop/products/Baba_160_H1-500x500_600x.jpg?v=1597270519"
+    },
+    {
+      "name": "Baba 160 Small",
+      "price": 5.0,
+      "shop_qty": 12,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://hookah1.com/cdn/shop/products/baba16010gm_600x.jpg?v=1685223369"
+    },
+    {
+      "name": "Baba Elaichi",
+      "price": 6.0,
+      "shop_qty": 1,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://gracebasket.com/16503-large_default/baba-elaichi-silver-coated-saffron-blended-elaichi-mouth-freshener-014gm-pouch-pack-of-360.jpg"
+    },
+    {
+      "name": "Baghban 138",
+      "price": 7.0,
+      "shop_qty": 13,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://www.gutkhausa.com/cdn/shop/files/Untitleddesign-5copy_ebe39425-8db1-4d9e-9cf5-8664383f2acb.png?v=1745354382&width=800"
+    },
+    {
+      "name": "Baghban ULTRA 138 NEW",
+      "price": 10.0,
+      "shop_qty": 3,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://www.gutkhausa.com/cdn/shop/files/Untitleddesign-5copy_ebe39425-8db1-4d9e-9cf5-8664383f2acb.png?v=1745354382&width=800"
+    },
+    {
+      "name": "Bombay Supari",
+      "price": 7.0,
+      "shop_qty": 21,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://sangamstore.com/cdn/shop/products/image_45c1ef8a-0c4f-4ffd-b0d4-8b9ca3ecef0e_1024x1024.jpg?v=1587685255"
+    },
+    {
+      "name": "Budhalal",
+      "price": 6.0,
+      "shop_qty": 39,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://hookah1.com/cdn/shop/products/budhlal-500x500_100x.jpg?v=1599606621"
+    },
+    {
+      "name": "Chaini Khaini",
+      "price": 11.0,
+      "shop_qty": 6,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://smokekart.in/cdn/shop/files/Chaini-Khaini-pack-min.jpg?v=1752518690&width=2000"
+    },
+    {
+      "name": "Chutki",
+      "price": 7.0,
+      "shop_qty": 1,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://sangamstore.com/cdn/shop/products/image_7c20a507-6022-4f89-aa1f-eabed1add878_1024x1024@2x.jpg?v=1588115450"
+    },
+    {
+      "name": "Cool lip",
+      "price": 16.0,
+      "shop_qty": 38,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://thedesifood.com/media/Cool-Lip-Filter-Pouch-14-2-88-g-1.webp"
+    },
+    {
+      "name": "Gold Plus Sopari",
+      "price": 6.0,
+      "shop_qty": 25,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://desisupermarket.com/wp-content/uploads/2023/07/PhotoRoom-20230626-114718-500x613.jpg"
+    },
+    {
+      "name": "Gulab Powder",
+      "price": 17.0,
+      "shop_qty": 2,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://5.imimg.com/data5/EK/SL/DN/ANDROID-7030390/product-jpeg-500x500.jpg"
+    },
+    {
+      "name": "Hira Moti",
+      "price": 7.0,
+      "shop_qty": 40,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://www.indianmarketus.com/cdn/shop/products/image_-_Devanshi_Shah-removebg-preview_grande_764ffeec-c8a4-4b17-8b92-22979ba2bafb_2048x2048.png?v=1570244415"
+    },
+    {
+      "name": "Ipco",
+      "price": 6.0,
+      "shop_qty": 26,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://d2j6dbq0eux0bg.cloudfront.net/images/25854016/1383711417.jpg"
+    },
+    {
+      "name": "Kashmiri Qiwam",
+      "price": 10.0,
+      "shop_qty": 9,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://hookah1.com/cdn/shop/products/KQ_H1-500x500_600x.jpg?v=1562430766"
+    },
+    {
+      "name": "Madhuri Katha",
+      "price": 6.0,
+      "shop_qty": 2,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": null
+    },
+    {
+      "name": "Meenakshi",
+      "price": 10.0,
+      "shop_qty": 20,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://5.imimg.com/data5/SELLER/Default/2022/3/TR/WE/AK/111735166/100-minaxi-dhakad-supari-5rs-1000x1000.jpg"
+    },
+    {
+      "name": "Meenakshi Khus",
+      "price": 10.0,
+      "shop_qty": 0,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://cpimg.tistatic.com/11064090/b/4/Meenakshi-Barmer-Supari..jpg"
+    },
+    {
+      "name": "Milan Supari",
+      "price": 6.0,
+      "shop_qty": 39,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://5.imimg.com/data5/SZ/ZE/PK/SELLER-3466027/milan-sugandhi-supari-pouch-pack-12s-rs-5--500x500.jpeg"
+    },
+    {
+      "name": "Mirag",
+      "price": 19.0,
+      "shop_qty": 12,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://hookah1.com/cdn/shop/products/mirage-500x500-warning_600x.jpg?v=1562433392"
+    },
+    {
+      "name": "Nauratan Chutney",
+      "price": 22.0,
+      "shop_qty": 0,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://5.imimg.com/data5/SELLER/Default/2023/11/364745605/GK/JQ/MC/89437936/baba-nauratan-pan-chutney-1000x1000.jpeg"
+    },
+    {
+      "name": "Pan Parag Gutka",
+      "price": 18.0,
+      "shop_qty": 1,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://jyenaenterprisesusa.com/wp-content/uploads/2024/04/PP-GUTKHA-NEW-PACKAGING-900x900.png"
+    },
+    {
+      "name": "Pan Parag Pouch",
+      "price": 22.0,
+      "shop_qty": 0,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://hookah1.com/cdn/shop/products/PanparagPouch_100x.jpg?v=1599606910"
+    },
+    {
+      "name": "Pan Parag Tin",
+      "price": 11.0,
+      "shop_qty": 41,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://sangamstore.com/cdn/shop/products/panparag2_300x300.png?v=1588118535"
+    },
+    {
+      "name": "Panderpuri Hanuman Chhap",
+      "price": 9.0,
+      "shop_qty": 2,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://hookah1.com/cdn/shop/products/hanuman_chaapH1-500x500_600x.jpg?v=1599683803"
+    },
+    {
+      "name": "RMD Gutka",
+      "price": 33.0,
+      "shop_qty": 12,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://hookah1.com/cdn/shop/products/RMD_New_600x.jpg?v=1598048412"
+    },
+    {
+      "name": "RMD Sada",
+      "price": 30.0,
+      "shop_qty": 26,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://thepaanhouse.com/wp-content/uploads/2025/04/Group-53-900x900.jpg"
+    },
+    {
+      "name": "Rajnigandha Pouch Big",
+      "price": 68.0,
+      "shop_qty": 0,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://www.mypaanshop.com/image/cache/catalog/rajnigandha-pan-masala-550x550h.jpeg"
+    },
+    {
+      "name": "Rajnigandha Red Mazaa",
+      "price": 13.0,
+      "shop_qty": 11,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://hookah1.com/cdn/shop/products/c8d5ab95-6cd2-49e1-855f-e0ef7a2f31af_600x.jpg?v=1598048412"
+    },
+    {
+      "name": "Rajnigandha Saffron",
+      "price": 13.0,
+      "shop_qty": 34,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://pushmycart.com/cdn/shop/files/RajinigandhaSaffroon_1024x1024.png?v=1741243668"
+    },
+    {
+      "name": "Rajnigandha Tin",
+      "price": 13.0,
+      "shop_qty": 27,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://www.mystore.in/s/62ea2c599d1398fa16dbae0a/67b3a0d4b352b0c78c9b6cfe/8901389000631_1-800x800.jpg"
+    },
+    {
+      "name": "Rasily",
+      "price": 7.0,
+      "shop_qty": 9,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://hookah1.com/cdn/shop/products/RASILY-SUPARI--1x12-500x500_100x.jpg?v=1562446081"
+    },
+    {
+      "name": "Rasva",
+      "price": 8.0,
+      "shop_qty": 22,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://d2j6dbq0eux0bg.cloudfront.net/images/25854016/1383711740.jpg"
+    },
+    {
+      "name": "Ratna 300",
+      "price": 7.0,
+      "shop_qty": 27,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://cdn11.bigcommerce.com/s-i4e9d/images/stencil/1280x1280/products/1373/2706/Ratna300_tobacco__57327.1765996464.jpg?c=2"
+    },
+    {
+      "name": "Shahi Deluxe Sopari",
+      "price": 6.0,
+      "shop_qty": 15,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://dailycart.com/cdn/shop/products/shah-deluxe-supari.jpg?v=1651902378"
+    },
+    {
+      "name": "Sunny",
+      "price": 6.0,
+      "shop_qty": 29,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://gandhifood.com/cdn/shop/files/13943513316df25795c1d353290860b5-2_1024x.jpg?v=1721667173"
+    },
+    {
+      "name": "Tulsi 00 Tin",
+      "price": 11.0,
+      "shop_qty": 38,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://www.alchemytradex.com/cdn/shop/files/WhatsApp_Image_2024-07-23_at_00.07.26_1f61b807.jpg"
+    },
+    {
+      "name": "Tulsi Pouch",
+      "price": 17.0,
+      "shop_qty": 5,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://hookah1.com/cdn/shop/products/TULSI-PAN-MASALA-1x12-500x500-warning_600x.jpg?v=1562446602"
+    },
+    {
+      "name": "Udta Panchi",
+      "price": 8.0,
+      "shop_qty": 35,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://hookah1.com/cdn/shop/products/UDTA_PANCHI_ARCHIT_KHAINI_600x.png?v=1596557422"
+    },
+    {
+      "name": "Vimal",
+      "price": 12.0,
+      "shop_qty": 34,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://smokekart.in/cdn/shop/files/vimal-pan-masala-pouch.jpg?v=1752518861&width=2000"
+    },
+    {
+      "name": "Zahoor Zafrani",
+      "price": 5.0,
+      "shop_qty": 0,
+      "warehouse_qty": 0,
+      "reorder_level": 5,
+      "image_url": "https://hookah1.com/cdn/shop/products/Zahoor-Zafrani-500x500_600x.jpg?v=1562445786"
+    }
+  ]
+}

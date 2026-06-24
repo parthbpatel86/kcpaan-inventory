@@ -1,0 +1,50 @@
+name,price,stock,status,source_img
+120 Plus,20,39,in_stock,img1
+600 Pouch,21,3,in_stock,img1
+7 Up Star Sopari Silver,6,17,in_stock,img1
+90 Nauratan Qiwam Small,10,25,in_stock,img1
+90 Qiwam Baba Nauratan,42,0,out_of_stock,img1
+Baba 120 No Silver,11,10,in_stock,img1
+Baba 120 Silver,14,10,in_stock,img2
+Baba 120 Small,4,15,in_stock,img2
+Baba 160,23,21,in_stock,img2
+Baba 160 Small,5,12,in_stock,img2
+Baba Elaichi,6,1,in_stock,img2
+Baghban 138,7,13,in_stock,img2
+Baghban ULTRA 138 NEW,10,3,in_stock,img3
+Bombay Supari,7,21,in_stock,img3
+Budhalal,6,39,in_stock,img3
+Chaini Khaini,11,6,in_stock,img3
+Chutki,7,1,in_stock,img3
+Cool lip,16,38,in_stock,img3
+Gold Plus Sopari,6,25,in_stock,img4
+Gulab Powder,17,2,in_stock,img4
+Hira Moti,7,40,in_stock,img4
+Ipco,6,26,in_stock,img4
+Kashmiri Qiwam,10,9,in_stock,img4
+Madhuri Katha,6,2,in_stock,img4
+Meenakshi,10,20,in_stock,img5
+Meenakshi Khus,10,0,out_of_stock,img5
+Milan Supari,6,39,in_stock,img5
+Mirag,19,12,in_stock,img5
+Nauratan Chutney,22,0,out_of_stock,img5
+Pan Parag Gutka,18,1,in_stock,img5
+Pan Parag Pouch,22,0,out_of_stock,img6
+Pan Parag Tin,11,41,in_stock,img6
+Panderpuri Hanuman Chhap,9,2,in_stock,img6
+RMD Gutka,33,12,in_stock,img6
+RMD Sada,30,26,in_stock,img6
+Rajnigandha Pouch Big,68,0,out_of_stock,img6
+Rajnigandha Red Mazaa,13,11,in_stock,img7
+Rajnigandha Saffron,13,34,in_stock,img7
+Rajnigandha Tin,13,27,in_stock,img7
+Rasily,7,9,in_stock,img7
+Rasva,8,22,in_stock,img7
+Ratna 300,7,27,in_stock,img7
+Shahi Deluxe Sopari,6,15,in_stock,img8
+Sunny,6,29,in_stock,img8
+Tulsi 00 Tin,11,38,in_stock,img8
+Tulsi Pouch,17,5,in_stock,img8
+Udta Panchi,8,35,in_stock,img8
+Vimal,12,34,in_stock,img8
+Zahoor Zafrani,5,0,out_of_stock,img9
