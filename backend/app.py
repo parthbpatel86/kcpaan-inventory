@@ -377,12 +377,13 @@ def reports():
     """Sales analytics over a date range. Query: ?from=YYYY-MM-DD&to=YYYY-MM-DD (default last 7 days)."""
     frm = request.args.get("from")
     to = request.args.get("to")
+    # default: last 7 days through today (computed in Python — dialect-neutral)
+    from datetime import date, timedelta
+    if not to:
+        to = date.today().isoformat()
+    if not frm:
+        frm = (date.today() - timedelta(days=6)).isoformat()
     with get_conn() as conn:
-        # default: last 7 days through today
-        if not frm:
-            frm = conn.execute("SELECT date('now','localtime','-6 days')").fetchone()[0]
-        if not to:
-            to = conn.execute("SELECT date('now','localtime')").fetchone()[0]
 
         where = "voided = 0 AND date(created_at,'localtime') BETWEEN date(?) AND date(?)"
         totals = conn.execute(
