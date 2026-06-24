@@ -102,6 +102,17 @@ export default function Home() {
           </View>
           <Text style={styles.chev}>›</Text>
         </Pressable>
+
+        <View style={styles.secondaryRow}>
+          <Pressable style={({ pressed }) => [styles.secCard, pressed && styles.pressed]} onPress={() => router.push('/history')}>
+            <Text style={styles.secEmoji}>🧾</Text>
+            <Text style={styles.secTitle}>History</Text>
+          </Pressable>
+          <Pressable style={({ pressed }) => [styles.secCard, pressed && styles.pressed]} onPress={() => askPin('/reports')}>
+            <Text style={styles.secEmoji}>📊</Text>
+            <Text style={styles.secTitle}>Reports · PIN</Text>
+          </Pressable>
+        </View>
       </ScrollView>
 
       <Modal visible={pinVisible} transparent animationType="fade" onRequestClose={() => setPinVisible(false)}>
@@ -163,6 +174,10 @@ const styles = StyleSheet.create({
   bigTitle: { fontSize: 24, fontWeight: '800', color: colors.text },
   bigDesc: { fontSize: 14, color: colors.textMuted, marginTop: 2 },
   chev: { fontSize: 36, color: colors.textLight, fontWeight: '300' },
+  secondaryRow: { flexDirection: 'row', gap: spacing.md },
+  secCard: { flex: 1, backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, alignItems: 'center', ...shadow.card },
+  secEmoji: { fontSize: 30 },
+  secTitle: { fontSize: 15, fontWeight: '700', color: colors.text, marginTop: spacing.xs },
 
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: spacing.xl },
   pinBox: { backgroundColor: colors.white, borderRadius: radius.lg, padding: spacing.xl },

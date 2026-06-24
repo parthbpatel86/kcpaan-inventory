@@ -19,10 +19,9 @@ export default function RootLayout() {
         >
           <Stack.Screen name="index" options={{ headerShown: false }} />
           <Stack.Screen name="pos" options={{ headerShown: false }} />
-          <Stack.Screen
-            name="stock"
-            options={{ title: 'Stock Management', headerShown: false }}
-          />
+          <Stack.Screen name="stock" options={{ headerShown: false }} />
+          <Stack.Screen name="history" options={{ headerShown: false }} />
+          <Stack.Screen name="reports" options={{ headerShown: false }} />
         </Stack>
       </CartProvider>
     </SafeAreaProvider>

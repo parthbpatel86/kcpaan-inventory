@@ -56,6 +56,10 @@ export const api = {
     req(`/api/products/${id}/stock`, { method: 'POST', body: JSON.stringify(data) }),
   createSale: (data) =>
     req('/api/sales', { method: 'POST', body: JSON.stringify(data) }),
+  listSales: (params = '') => req(`/api/sales${params}`),
+  getSale: (id) => req(`/api/sales/${id}`),
+  voidSale: (id) => req(`/api/sales/${id}/void`, { method: 'POST' }),
+  reports: (params = '') => req(`/api/reports${params}`),
   salesSummary: () => req('/api/sales/summary'),
   dashboard: () => req('/api/dashboard'),
   verifyPin: (pin) =>

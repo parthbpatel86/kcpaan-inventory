@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, Pressable, FlatList, ActivityIndicator,
-  Modal, Alert, RefreshControl, ScrollView, useWindowDimensions,
+  Modal, Alert, RefreshControl, ScrollView, TextInput, useWindowDimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -9,6 +9,9 @@ import { colors, radius, spacing, shadow, HEALTH } from '../src/lib/theme';
 import { api } from '../src/lib/api';
 import { useCart } from '../src/lib/cart';
 import ProductImage from '../src/components/ProductImage';
+import { createSaleResilient, syncPending, pendingCount } from '../src/lib/offline';
+
+const STOCK_PIN = '1031';
 
 export default function POS() {
   const router = useRouter();
@@ -21,6 +24,11 @@ export default function POS() {
   const [checkoutVisible, setCheckoutVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [category, setCategory] = useState('All');
+  const [discount, setDiscount] = useState(0);       // applied discount amount ($)
+  const [discountVisible, setDiscountVisible] = useState(false);
+  const [pinModalVisible, setPinModalVisible] = useState(false);
+  const [pending, setPending] = useState(0);          // queued offline sales
+  const [offline, setOffline] = useState(false);
 
   const wideEnough = width >= 700;
   const numColumns = wideEnough ? 3 : 2;
@@ -30,8 +38,18 @@ export default function POS() {
       setError(null);
       const data = await api.listProducts();
       setProducts(data);
+      setOffline(false);
+      // back online → flush any queued sales
+      const synced = await syncPending();
+      if (synced > 0) {
+        const data2 = await api.listProducts();
+        setProducts(data2);
+      }
+      setPending(await pendingCount());
     } catch (e) {
       setError(String(e.message || e));
+      setOffline(true);
+      setPending(await pendingCount());
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -54,16 +72,24 @@ export default function POS() {
     [products, category]
   );
 
+  // discounted total for display
+  const cartTotal = Math.max(0, cart.total - discount);
+
   async function checkout(paymentType) {
     if (cart.list.length === 0) return;
     setSubmitting(true);
     try {
       const items = cart.list.map((i) => ({ product_id: i.product.id, qty: i.qty }));
-      const res = await api.createSale({ payment_type: paymentType, items });
+      const res = await createSaleResilient({ payment_type: paymentType, items, discount });
       cart.clear();
+      setDiscount(0);
       setCheckoutVisible(false);
       load();
-      Alert.alert('Sale complete', `$${res.total.toFixed(2)} — ${labelForType(paymentType)}`);
+      if (res.queued) {
+        Alert.alert('Saved offline', `$${cartTotal.toFixed(2)} — ${labelForType(paymentType)}\nWill sync when back online.`);
+      } else {
+        Alert.alert('Sale complete', `$${res.result.total.toFixed(2)} — ${labelForType(paymentType)}`);
+      }
     } catch (e) {
       Alert.alert('Checkout failed', String(e.message || e));
     } finally {
@@ -76,6 +102,7 @@ export default function POS() {
     if (cart.list.length === 0) return;
     checkout('cash');
   }
+
 
   function renderCard({ item }) {
     const health = HEALTH[item.health] || HEALTH.healthy;
@@ -122,10 +149,16 @@ export default function POS() {
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} hitSlop={12}><Text style={styles.back}>‹ Home</Text></Pressable>
         <Text style={styles.headerTitle}>Shop Sales</Text>
-        <Pressable onPress={load} hitSlop={12}><Text style={styles.refresh}>↻</Text></Pressable>
+        <Pressable onPress={() => router.push('/history')} hitSlop={12}><Text style={styles.refresh}>🧾</Text></Pressable>
       </View>
 
-      {error && <View style={styles.errorBar}><Text style={styles.errorTxt}>⚠ {error}</Text></View>}
+      {(offline || pending > 0) && (
+        <View style={styles.offlineBar}>
+          <Text style={styles.offlineTxt}>
+            {offline ? '📴 Offline — sales are saved on this device' : `🔄 ${pending} sale${pending === 1 ? '' : 's'} waiting to sync`}
+          </Text>
+        </View>
+      )}
 
       <View style={styles.body}>
         <View style={styles.gridWrap}>
@@ -174,15 +207,15 @@ export default function POS() {
           />
         </View>
 
-        {wideEnough && <CartPanel cart={cart} onCheckout={() => setCheckoutVisible(true)} onQuickCash={quickCash} submitting={submitting} />}
+        {wideEnough && <CartPanel cart={cart} cartTotal={cartTotal} discount={discount} onCheckout={() => setCheckoutVisible(true)} onQuickCash={quickCash} submitting={submitting} />}
       </View>
 
       {/* Bottom cart bar with quick-cash + full checkout */}
       {!wideEnough && cart.count > 0 && (
         <View style={styles.cartBar}>
           <View style={styles.cartBarInfo}>
-            <Text style={styles.cartBarCount}>{cart.count} item{cart.count === 1 ? '' : 's'}</Text>
-            <Text style={styles.cartBarTotal}>${cart.total.toFixed(2)}</Text>
+            <Text style={styles.cartBarCount}>{cart.count} item{cart.count === 1 ? '' : 's'}{discount > 0 ? ` · -$${discount.toFixed(2)}` : ''}</Text>
+            <Text style={styles.cartBarTotal}>${cartTotal.toFixed(2)}</Text>
           </View>
           <Pressable style={styles.cashBtn} onPress={quickCash} disabled={submitting}>
             <Text style={styles.cashEmoji}>💵</Text>
@@ -194,7 +227,20 @@ export default function POS() {
         </View>
       )}
 
-      <CheckoutModal visible={checkoutVisible} cart={cart} submitting={submitting} onClose={() => setCheckoutVisible(false)} onPay={checkout} />
+      <CheckoutModal
+        visible={checkoutVisible} cart={cart} cartTotal={cartTotal} discount={discount}
+        submitting={submitting} onClose={() => setCheckoutVisible(false)} onPay={checkout}
+        onDiscount={() => setPinModalVisible(true)} onClearDiscount={() => setDiscount(0)}
+      />
+
+      <DiscountPinModal
+        pinVisible={pinModalVisible} discountVisible={discountVisible}
+        maxAmount={cart.total}
+        onPinOk={() => { setPinModalVisible(false); setDiscountVisible(true); }}
+        onPinCancel={() => setPinModalVisible(false)}
+        onApply={(amt) => { setDiscount(amt); setDiscountVisible(false); }}
+        onDiscountCancel={() => setDiscountVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -227,12 +273,15 @@ function CartPanel({ cart, onCheckout, onQuickCash, submitting }) {
         />
       )}
       <View style={styles.panelFooter}>
-        <View style={styles.totalRow}><Text style={styles.totalLabel}>Total</Text><Text style={styles.totalValue}>${cart.total.toFixed(2)}</Text></View>
+        {discount > 0 && (
+          <View style={styles.totalRow}><Text style={styles.discLabel}>Discount</Text><Text style={styles.discValue}>-${discount.toFixed(2)}</Text></View>
+        )}
+        <View style={styles.totalRow}><Text style={styles.totalLabel}>Total</Text><Text style={styles.totalValue}>${cartTotal.toFixed(2)}</Text></View>
         <Pressable style={[styles.panelCash, cart.list.length === 0 && styles.disabled]} onPress={onQuickCash} disabled={cart.list.length === 0 || submitting}>
-          <Text style={styles.panelCashTxt}>💵 Cash — ${cart.total.toFixed(2)}</Text>
+          <Text style={styles.panelCashTxt}>💵 Cash — ${cartTotal.toFixed(2)}</Text>
         </Pressable>
         <Pressable style={[styles.panelMore, cart.list.length === 0 && styles.disabled]} onPress={onCheckout} disabled={cart.list.length === 0}>
-          <Text style={styles.panelMoreTxt}>Card / In-store</Text>
+          <Text style={styles.panelMoreTxt}>Card / In-store / Discount</Text>
         </Pressable>
         {cart.list.length > 0 && <Pressable onPress={cart.clear} style={styles.clearBtn}><Text style={styles.clearTxt}>Clear order</Text></Pressable>}
       </View>
@@ -244,14 +293,28 @@ function labelForType(t) {
   return t === 'card' ? 'Credit Card' : t === 'cash' ? 'Cash' : 'In-store use';
 }
 
-function CheckoutModal({ visible, cart, submitting, onClose, onPay }) {
+function CheckoutModal({ visible, cart, cartTotal, discount, submitting, onClose, onPay, onDiscount, onClearDiscount }) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.modalBg}>
         <View style={styles.checkoutSheet}>
           <View style={styles.sheetHandle} />
           <Text style={styles.sheetTitle}>Checkout</Text>
-          <View style={styles.sheetSummary}><Text style={styles.muted}>{cart.count} items</Text><Text style={styles.sheetTotal}>${cart.total.toFixed(2)}</Text></View>
+          <View style={styles.sheetSummary}>
+            <Text style={styles.muted}>{cart.count} items</Text>
+            <View style={{ alignItems: 'flex-end' }}>
+              {discount > 0 && <Text style={styles.sheetStrike}>${cart.total.toFixed(2)}</Text>}
+              <Text style={styles.sheetTotal}>${cartTotal.toFixed(2)}</Text>
+            </View>
+          </View>
+
+          {/* Discount control (manager PIN gated) */}
+          <Pressable style={styles.discRow} onPress={discount > 0 ? onClearDiscount : onDiscount} disabled={submitting}>
+            <Text style={styles.discRowTxt}>
+              {discount > 0 ? `🏷️ Discount applied: -$${discount.toFixed(2)} — tap to remove` : '🏷️ Add discount (manager)'}
+            </Text>
+          </Pressable>
+
           <Text style={styles.payLabel}>Choose payment</Text>
           <View style={styles.payRow}>
             <PayBtn color={colors.cash} emoji="💵" label="Cash" onPress={() => onPay('cash')} disabled={submitting} />
@@ -263,6 +326,55 @@ function CheckoutModal({ visible, cart, submitting, onClose, onPay }) {
         </View>
       </View>
     </Modal>
+  );
+}
+
+const DISCOUNT_PIN = '1031';
+
+function DiscountPinModal({ pinVisible, discountVisible, maxAmount, onPinOk, onPinCancel, onApply, onDiscountCancel }) {
+  const [pin, setPin] = useState('');
+  const [amt, setAmt] = useState('');
+
+  function submitPin() {
+    if (pin === DISCOUNT_PIN) { setPin(''); onPinOk(); }
+    else { Alert.alert('Wrong PIN'); setPin(''); }
+  }
+  function apply() {
+    const v = Math.min(parseFloat(amt) || 0, maxAmount);
+    setAmt('');
+    onApply(v);
+  }
+
+  return (
+    <>
+      <Modal visible={pinVisible} transparent animationType="fade" onRequestClose={onPinCancel}>
+        <View style={styles.modalBg2}>
+          <View style={styles.pinBox}>
+            <Text style={styles.pinTitle}>Manager PIN</Text>
+            <Text style={styles.pinSub}>Required to apply a discount</Text>
+            <TextInput style={styles.pinInput} value={pin} onChangeText={setPin} keyboardType="number-pad" secureTextEntry maxLength={8} autoFocus placeholder="••••" placeholderTextColor={colors.textLight} />
+            <View style={styles.pinRow}>
+              <Pressable style={[styles.pinBtn, styles.pinCancel]} onPress={() => { setPin(''); onPinCancel(); }}><Text style={styles.pinCancelTxt}>Cancel</Text></Pressable>
+              <Pressable style={[styles.pinBtn, styles.pinGo]} onPress={submitPin}><Text style={styles.pinGoTxt}>OK</Text></Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={discountVisible} transparent animationType="fade" onRequestClose={onDiscountCancel}>
+        <View style={styles.modalBg2}>
+          <View style={styles.pinBox}>
+            <Text style={styles.pinTitle}>Discount Amount</Text>
+            <Text style={styles.pinSub}>Order total: ${maxAmount.toFixed(2)}</Text>
+            <TextInput style={styles.pinInput} value={amt} onChangeText={setAmt} keyboardType="decimal-pad" autoFocus placeholder="$0.00" placeholderTextColor={colors.textLight} />
+            <View style={styles.pinRow}>
+              <Pressable style={[styles.pinBtn, styles.pinCancel]} onPress={() => { setAmt(''); onDiscountCancel(); }}><Text style={styles.pinCancelTxt}>Cancel</Text></Pressable>
+              <Pressable style={[styles.pinBtn, styles.pinGo]} onPress={apply}><Text style={styles.pinGoTxt}>Apply</Text></Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
 
@@ -284,6 +396,8 @@ const styles = StyleSheet.create({
   headerTitle: { color: colors.white, fontSize: 19, fontWeight: '800' },
   refresh: { color: colors.white, fontSize: 24 },
   errorBar: { backgroundColor: '#FDECEA', padding: spacing.sm, paddingHorizontal: spacing.lg },
+  offlineBar: { backgroundColor: colors.gold, paddingVertical: spacing.sm, paddingHorizontal: spacing.lg },
+  offlineTxt: { color: colors.text, fontSize: 13, fontWeight: '700', textAlign: 'center' },
   errorTxt: { color: colors.order, fontSize: 13 },
   body: { flex: 1, flexDirection: 'row' },
   gridWrap: { flex: 1 },
@@ -373,4 +487,22 @@ const styles = StyleSheet.create({
   payTxt: { color: colors.white, fontWeight: '800', fontSize: 13, textAlign: 'center' },
   sheetCancel: { alignItems: 'center', paddingVertical: spacing.md, marginTop: spacing.lg },
   sheetCancelTxt: { color: colors.textMuted, fontSize: 16, fontWeight: '600' },
+
+  // discount + pin
+  discLabel: { fontSize: 14, color: colors.accent, fontWeight: '600' },
+  discValue: { fontSize: 16, color: colors.accent, fontWeight: '800' },
+  sheetStrike: { fontSize: 16, color: colors.textLight, textDecorationLine: 'line-through' },
+  discRow: { backgroundColor: colors.surfaceAlt, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: 'center', marginBottom: spacing.lg, borderWidth: 1, borderColor: colors.border, borderStyle: 'dashed' },
+  discRowTxt: { color: colors.text, fontWeight: '700', fontSize: 14 },
+  modalBg2: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: spacing.xl },
+  pinBox: { backgroundColor: colors.white, borderRadius: radius.lg, padding: spacing.xl },
+  pinTitle: { fontSize: 20, fontWeight: '700', color: colors.text, textAlign: 'center' },
+  pinSub: { fontSize: 13, color: colors.textMuted, textAlign: 'center', marginTop: 4, marginBottom: spacing.lg },
+  pinInput: { borderWidth: 2, borderColor: colors.border, borderRadius: radius.md, fontSize: 28, textAlign: 'center', letterSpacing: 4, paddingVertical: spacing.md, color: colors.text, marginBottom: spacing.lg },
+  pinRow: { flexDirection: 'row', gap: spacing.md },
+  pinBtn: { flex: 1, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: 'center' },
+  pinCancel: { backgroundColor: colors.surfaceAlt },
+  pinCancelTxt: { color: colors.textMuted, fontWeight: '700', fontSize: 16 },
+  pinGo: { backgroundColor: colors.primary },
+  pinGoTxt: { color: colors.white, fontWeight: '700', fontSize: 16 },
 });
