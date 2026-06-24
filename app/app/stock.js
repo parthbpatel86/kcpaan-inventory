@@ -3,19 +3,28 @@ import {
   View, Text, StyleSheet, Pressable, FlatList, ActivityIndicator,
   Modal, TextInput, Alert, RefreshControl, ScrollView, KeyboardAvoidingView, Platform,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, spacing, shadow, HEALTH } from '../src/lib/theme';
 import { api } from '../src/lib/api';
 
+const FILTERS = [
+  { key: 'all', label: 'All' },
+  { key: 'reorder', label: '🔴 Reorder' },
+  { key: 'low', label: '🟡 Low' },
+];
+
 export default function Stock() {
   const router = useRouter();
+  const params = useLocalSearchParams();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const [editProduct, setEditProduct] = useState(null); // product or 'new'
   const [search, setSearch] = useState('');
+  // Deep-link: /stock?filter=reorder opens straight into the reorder list.
+  const [filter, setFilter] = useState(params.filter === 'reorder' ? 'reorder' : 'all');
 
   const load = useCallback(async () => {
     try {
@@ -32,36 +41,66 @@ export default function Stock() {
 
   useEffect(() => { load(); }, [load]);
 
-  const filtered = products.filter((p) =>
-    p.name.toLowerCase().includes(search.toLowerCase()) ||
-    (p.category || '').toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = products.filter((p) => {
+    if (filter === 'reorder' && p.health !== 'order') return false;
+    if (filter === 'low' && p.health !== 'low') return false;
+    const q = search.toLowerCase();
+    return p.name.toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q);
+  });
 
   const totalShop = products.reduce((s, p) => s + p.shop_qty, 0);
   const totalWh = products.reduce((s, p) => s + p.warehouse_qty, 0);
   const orderCount = products.filter((p) => p.health === 'order').length;
 
+  // One-tap restock: move from warehouse to shop (or add if no warehouse stock).
+  async function quickRestock(product, amount) {
+    try {
+      if (product.warehouse_qty >= amount) {
+        await api.adjustStock(product.id, { kind: 'move', delta: amount, note: 'quick restock' });
+      } else {
+        await api.adjustStock(product.id, { kind: 'add', location: 'shop', delta: amount, note: 'quick add' });
+      }
+      load();
+    } catch (e) {
+      Alert.alert('Restock failed', String(e.message || e));
+    }
+  }
+
   function renderRow({ item }) {
     const health = HEALTH[item.health] || HEALTH.healthy;
+    const needsStock = item.health === 'order' || item.health === 'low';
     return (
-      <Pressable style={styles.row} onPress={() => setEditProduct(item)}>
-        <View style={[styles.rowAccent, { backgroundColor: health.color }]} />
-        <Text style={styles.rowEmoji}>{item.emoji || '🍃'}</Text>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.rowName}>{item.name}</Text>
-          <Text style={styles.rowCat}>{item.category || '—'} · ${item.price.toFixed(2)}</Text>
-        </View>
-        <View style={styles.rowStocks}>
-          <View style={styles.stockChip}>
-            <Text style={styles.stockChipLabel}>Shop</Text>
-            <Text style={styles.stockChipVal}>{item.shop_qty}</Text>
+      <View style={styles.rowWrap}>
+        <Pressable style={styles.row} onPress={() => setEditProduct(item)}>
+          <View style={[styles.rowAccent, { backgroundColor: health.color }]} />
+          <Text style={styles.rowEmoji}>{item.emoji || '🍃'}</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rowName}>{item.name}</Text>
+            <Text style={styles.rowCat}>{item.category || '—'} · ${item.price.toFixed(2)}</Text>
           </View>
-          <View style={[styles.stockChip, styles.stockChipWh]}>
-            <Text style={styles.stockChipLabel}>WH</Text>
-            <Text style={styles.stockChipVal}>{item.warehouse_qty}</Text>
+          <View style={styles.rowStocks}>
+            <View style={styles.stockChip}>
+              <Text style={styles.stockChipLabel}>Shop</Text>
+              <Text style={styles.stockChipVal}>{item.shop_qty}</Text>
+            </View>
+            <View style={[styles.stockChip, styles.stockChipWh]}>
+              <Text style={styles.stockChipLabel}>WH</Text>
+              <Text style={styles.stockChipVal}>{item.warehouse_qty}</Text>
+            </View>
           </View>
-        </View>
-      </Pressable>
+        </Pressable>
+        {/* One-tap restock buttons appear only for low/order items */}
+        {needsStock && (
+          <View style={styles.quickRow}>
+            <Text style={styles.quickHint}>Restock to shop:</Text>
+            {[10, 25, 50].map((n) => (
+              <Pressable key={n} style={styles.quickBtn} onPress={() => quickRestock(item, n)}>
+                <Text style={styles.quickBtnTxt}>+{n}</Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
+      </View>
     );
   }
 
@@ -86,11 +125,23 @@ export default function Stock() {
         </Pressable>
       </View>
 
-      {/* Stat strip */}
       <View style={styles.stats}>
         <Stat label="Shop stock" value={totalShop} />
         <Stat label="Warehouse" value={totalWh} />
         <Stat label="Order ASAP" value={orderCount} accent={orderCount > 0 ? colors.order : colors.healthy} />
+      </View>
+
+      {/* Filter chips */}
+      <View style={styles.chipRow}>
+        {FILTERS.map((f) => (
+          <Pressable
+            key={f.key}
+            style={[styles.chip, filter === f.key && styles.chipActive]}
+            onPress={() => setFilter(f.key)}
+          >
+            <Text style={[styles.chipTxt, filter === f.key && styles.chipTxtActive]}>{f.label}</Text>
+          </Pressable>
+        ))}
       </View>
 
       <View style={styles.searchWrap}>
@@ -111,6 +162,12 @@ export default function Stock() {
         renderItem={renderRow}
         contentContainerStyle={{ padding: spacing.md, gap: spacing.sm, paddingBottom: 40 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <Text style={styles.emptyEmoji}>{filter === 'reorder' ? '✅' : '🔍'}</Text>
+            <Text style={styles.muted}>{filter === 'reorder' ? 'Nothing needs reordering!' : 'No matching products'}</Text>
+          </View>
+        }
       />
 
       {editProduct && (
@@ -144,7 +201,6 @@ function EditModal({ product, onClose, onSaved }) {
   const [whQty, setWhQty] = useState(isNew ? '0' : null);
   const [busy, setBusy] = useState(false);
 
-  // stock adjustment inputs (existing product)
   const [adjShop, setAdjShop] = useState('');
   const [adjWh, setAdjWh] = useState('');
   const [moveQty, setMoveQty] = useState('');
@@ -192,7 +248,6 @@ function EditModal({ product, onClose, onSaved }) {
     if (!n) return;
     setBusy(true);
     try {
-      // positive delta = warehouse -> shop
       await api.adjustStock(product.id, { kind: 'move', delta: n, note: 'warehouse->shop' });
       onSaved();
     } catch (e) {
@@ -225,7 +280,6 @@ function EditModal({ product, onClose, onSaved }) {
           <ScrollView contentContainerStyle={{ paddingBottom: spacing.xl }} keyboardShouldPersistTaps="handled">
             <Text style={styles.sheetTitle}>{isNew ? 'New Product' : product.name}</Text>
 
-            {/* Details */}
             <Text style={styles.section}>Details</Text>
             <Field label="Name" value={name} onChangeText={setName} placeholder="Product name" />
             <View style={styles.fieldRow}>
@@ -248,7 +302,6 @@ function EditModal({ product, onClose, onSaved }) {
               {busy ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryBtnTxt}>{isNew ? 'Create Product' : 'Save Details'}</Text>}
             </Pressable>
 
-            {/* Stock operations (existing only) */}
             {!isNew && (
               <>
                 <Text style={styles.section}>Adjust Stock</Text>
@@ -257,21 +310,12 @@ function EditModal({ product, onClose, onSaved }) {
                   <Text style={styles.currentStockTxt}>Warehouse: <Text style={styles.bold}>{product.warehouse_qty}</Text></Text>
                 </View>
 
-                <AdjustRow
-                  label="Shop floor" value={adjShop} onChange={setAdjShop}
-                  onApply={() => { applyAdjust('shop', adjShop); setAdjShop(''); }}
-                />
-                <AdjustRow
-                  label="Warehouse" value={adjWh} onChange={setAdjWh}
-                  onApply={() => { applyAdjust('warehouse', adjWh); setAdjWh(''); }}
-                />
+                <AdjustRow label="Shop floor" value={adjShop} onChange={setAdjShop} onApply={() => { applyAdjust('shop', adjShop); setAdjShop(''); }} />
+                <AdjustRow label="Warehouse" value={adjWh} onChange={setAdjWh} onApply={() => { applyAdjust('warehouse', adjWh); setAdjWh(''); }} />
 
                 <Text style={styles.section}>Move Warehouse → Shop</Text>
                 <View style={styles.moveRow}>
-                  <TextInput
-                    style={styles.moveInput} value={moveQty} onChangeText={setMoveQty}
-                    keyboardType="number-pad" placeholder="Qty" placeholderTextColor={colors.textLight}
-                  />
+                  <TextInput style={styles.moveInput} value={moveQty} onChangeText={setMoveQty} keyboardType="number-pad" placeholder="Qty" placeholderTextColor={colors.textLight} />
                   <Pressable style={styles.moveBtn} onPress={() => { applyMove(); setMoveQty(''); }} disabled={busy}>
                     <Text style={styles.moveBtnTxt}>Move →</Text>
                   </Pressable>
@@ -306,10 +350,7 @@ function AdjustRow({ label, value, onChange, onApply }) {
   return (
     <View style={styles.adjustRow}>
       <Text style={styles.adjustLabel}>{label}</Text>
-      <TextInput
-        style={styles.adjustInput} value={value} onChangeText={onChange}
-        keyboardType="numbers-and-punctuation" placeholder="+/- qty" placeholderTextColor={colors.textLight}
-      />
+      <TextInput style={styles.adjustInput} value={value} onChangeText={onChange} keyboardType="numbers-and-punctuation" placeholder="+/- qty" placeholderTextColor={colors.textLight} />
       <Pressable style={styles.adjustBtn} onPress={onApply}>
         <Text style={styles.adjustBtnTxt}>Apply</Text>
       </Pressable>
@@ -322,10 +363,7 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md, backgroundColor: colors.bg },
   muted: { color: colors.textMuted, fontSize: 14 },
   bold: { fontWeight: '800', color: colors.text },
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: colors.gold, paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
-  },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: colors.gold, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   back: { color: colors.text, fontSize: 17, fontWeight: '600' },
   headerTitle: { color: colors.text, fontSize: 19, fontWeight: '800' },
   addNew: { color: colors.text, fontSize: 16, fontWeight: '800' },
@@ -335,13 +373,20 @@ const styles = StyleSheet.create({
   statValue: { fontSize: 24, fontWeight: '800', color: colors.text },
   statLabel: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
 
+  chipRow: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.md, paddingTop: spacing.md },
+  chip: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.lg, backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border },
+  chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipTxt: { fontSize: 14, fontWeight: '700', color: colors.textMuted },
+  chipTxtActive: { color: colors.white },
+
   searchWrap: { padding: spacing.md, paddingBottom: spacing.sm },
   search: { backgroundColor: colors.surface, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, fontSize: 15, borderWidth: 1, borderColor: colors.border, color: colors.text },
 
   errorBar: { backgroundColor: '#FDECEA', padding: spacing.sm, paddingHorizontal: spacing.lg },
   errorTxt: { color: colors.order, fontSize: 13 },
 
-  row: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.md, gap: spacing.sm, overflow: 'hidden', ...shadow.card },
+  rowWrap: { backgroundColor: colors.surface, borderRadius: radius.md, overflow: 'hidden', ...shadow.card },
+  row: { flexDirection: 'row', alignItems: 'center', padding: spacing.md, gap: spacing.sm },
   rowAccent: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 5 },
   rowEmoji: { fontSize: 28, marginLeft: 4 },
   rowName: { fontSize: 15, fontWeight: '700', color: colors.text },
@@ -352,7 +397,14 @@ const styles = StyleSheet.create({
   stockChipLabel: { fontSize: 10, color: colors.textMuted, fontWeight: '700' },
   stockChipVal: { fontSize: 17, fontWeight: '800', color: colors.text },
 
-  // Edit modal
+  quickRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.md, paddingLeft: spacing.lg },
+  quickHint: { fontSize: 12, color: colors.textMuted, flex: 1 },
+  quickBtn: { backgroundColor: colors.primaryLight, borderRadius: radius.sm, paddingHorizontal: spacing.md, paddingVertical: 6, borderWidth: 1, borderColor: colors.primary },
+  quickBtnTxt: { color: colors.primary, fontWeight: '800', fontSize: 14 },
+
+  empty: { alignItems: 'center', justifyContent: 'center', paddingTop: 60, gap: spacing.md },
+  emptyEmoji: { fontSize: 48 },
+
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   editSheet: { backgroundColor: colors.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: spacing.lg, maxHeight: '92%' },
   sheetHandle: { alignSelf: 'center', width: 44, height: 5, borderRadius: 3, backgroundColor: colors.border, marginBottom: spacing.md },

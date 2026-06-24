@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, Pressable, Modal, TextInput, ActivityIndicator, Alert,
+  View, Text, StyleSheet, Pressable, Modal, TextInput, ActivityIndicator, Alert, ScrollView,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, spacing, shadow } from '../src/lib/theme';
 import { api } from '../src/lib/api';
@@ -10,8 +10,23 @@ import { api } from '../src/lib/api';
 export default function Home() {
   const router = useRouter();
   const [pinVisible, setPinVisible] = useState(false);
+  const [pinTarget, setPinTarget] = useState('/stock'); // where to go after PIN
   const [pin, setPin] = useState('');
   const [checking, setChecking] = useState(false);
+  const [dash, setDash] = useState(null);
+
+  const loadDash = useCallback(async () => {
+    try { setDash(await api.dashboard()); } catch (e) { /* offline — show nothing */ }
+  }, []);
+
+  // Refresh dashboard every time the home screen regains focus.
+  useFocusEffect(useCallback(() => { loadDash(); }, [loadDash]));
+
+  function askPin(target) {
+    setPinTarget(target);
+    setPin('');
+    setPinVisible(true);
+  }
 
   async function submitPin() {
     setChecking(true);
@@ -20,7 +35,7 @@ export default function Home() {
       if (res.ok) {
         setPinVisible(false);
         setPin('');
-        router.push('/stock');
+        router.push(pinTarget);
       } else {
         Alert.alert('Wrong PIN', 'That PIN is not correct.');
         setPin('');
@@ -34,30 +49,60 @@ export default function Home() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <Text style={styles.brand}>KC Paan</Text>
-        <Text style={styles.sub}>Point of Sale & Inventory</Text>
-      </View>
+      <ScrollView contentContainerStyle={styles.scroll}>
+        <View style={styles.header}>
+          <Text style={styles.brand}>KC Paan</Text>
+          <Text style={styles.sub}>Point of Sale & Inventory</Text>
+        </View>
 
-      <View style={styles.cards}>
+        {/* Manager glance: today's sales + reorder alert */}
+        <View style={styles.glance}>
+          <View style={styles.todayCard}>
+            <Text style={styles.todayLabel}>Today's Sales</Text>
+            <Text style={styles.todayValue}>
+              ${dash ? dash.today.total.toFixed(2) : '—'}
+            </Text>
+            <Text style={styles.todayCount}>
+              {dash ? `${dash.today.count} sale${dash.today.count === 1 ? '' : 's'}` : ' '}
+            </Text>
+          </View>
+
+          <Pressable
+            style={[styles.reorderCard, dash && dash.reorder_count > 0 ? styles.reorderAlert : styles.reorderOk]}
+            onPress={() => askPin('/stock?filter=reorder')}
+          >
+            <Text style={styles.reorderNum}>{dash ? dash.reorder_count : '—'}</Text>
+            <Text style={styles.reorderLabel}>
+              {dash && dash.reorder_count > 0 ? 'Need reorder →' : 'All stocked ✓'}
+            </Text>
+          </Pressable>
+        </View>
+
+        {/* Primary actions */}
         <Pressable
           style={({ pressed }) => [styles.bigCard, styles.posCard, pressed && styles.pressed]}
           onPress={() => router.push('/pos')}
         >
           <Text style={styles.bigEmoji}>🛒</Text>
-          <Text style={styles.bigTitle}>Shop Sales</Text>
-          <Text style={styles.bigDesc}>Ring up orders, take payment</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.bigTitle}>Shop Sales</Text>
+            <Text style={styles.bigDesc}>Ring up orders, take payment</Text>
+          </View>
+          <Text style={styles.chev}>›</Text>
         </Pressable>
 
         <Pressable
           style={({ pressed }) => [styles.bigCard, styles.stockCard, pressed && styles.pressed]}
-          onPress={() => setPinVisible(true)}
+          onPress={() => askPin('/stock')}
         >
           <Text style={styles.bigEmoji}>📦</Text>
-          <Text style={styles.bigTitle}>Stock Management</Text>
-          <Text style={styles.bigDesc}>Inventory & warehouse · PIN</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.bigTitle}>Stock Management</Text>
+            <Text style={styles.bigDesc}>Inventory & warehouse · PIN</Text>
+          </View>
+          <Text style={styles.chev}>›</Text>
         </Pressable>
-      </View>
+      </ScrollView>
 
       <Modal visible={pinVisible} transparent animationType="fade" onRequestClose={() => setPinVisible(false)}>
         <View style={styles.modalBg}>
@@ -91,20 +136,34 @@ export default function Home() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.primary },
-  header: { paddingTop: spacing.xl, paddingBottom: spacing.xl, alignItems: 'center' },
-  brand: { fontSize: 40, fontWeight: '800', color: colors.white, letterSpacing: 0.5 },
-  sub: { fontSize: 15, color: colors.primaryLight, marginTop: 4 },
-  cards: { flex: 1, padding: spacing.lg, gap: spacing.lg, justifyContent: 'center' },
+  scroll: { padding: spacing.lg, gap: spacing.lg },
+  header: { paddingTop: spacing.lg, alignItems: 'center' },
+  brand: { fontSize: 38, fontWeight: '800', color: colors.white, letterSpacing: 0.5 },
+  sub: { fontSize: 15, color: colors.primaryLight, marginTop: 2 },
+
+  glance: { flexDirection: 'row', gap: spacing.md },
+  todayCard: { flex: 1.4, backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, ...shadow.card },
+  todayLabel: { fontSize: 13, color: colors.textMuted, fontWeight: '600' },
+  todayValue: { fontSize: 34, fontWeight: '800', color: colors.primary, marginTop: 2 },
+  todayCount: { fontSize: 13, color: colors.textLight, marginTop: 2 },
+  reorderCard: { flex: 1, borderRadius: radius.lg, padding: spacing.lg, justifyContent: 'center', alignItems: 'center', ...shadow.card },
+  reorderOk: { backgroundColor: colors.healthy },
+  reorderAlert: { backgroundColor: colors.order },
+  reorderNum: { fontSize: 34, fontWeight: '800', color: colors.white },
+  reorderLabel: { fontSize: 13, color: colors.white, fontWeight: '700', marginTop: 2, textAlign: 'center' },
+
   bigCard: {
-    borderRadius: radius.xl, padding: spacing.xl, alignItems: 'center',
-    justifyContent: 'center', minHeight: 180, ...shadow.card,
+    flexDirection: 'row', alignItems: 'center', gap: spacing.lg,
+    borderRadius: radius.xl, padding: spacing.xl, ...shadow.card,
   },
   posCard: { backgroundColor: colors.white },
   stockCard: { backgroundColor: colors.gold },
-  pressed: { opacity: 0.85, transform: [{ scale: 0.98 }] },
-  bigEmoji: { fontSize: 56, marginBottom: spacing.sm },
-  bigTitle: { fontSize: 26, fontWeight: '800', color: colors.text },
-  bigDesc: { fontSize: 14, color: colors.textMuted, marginTop: 4 },
+  pressed: { opacity: 0.85, transform: [{ scale: 0.99 }] },
+  bigEmoji: { fontSize: 46 },
+  bigTitle: { fontSize: 24, fontWeight: '800', color: colors.text },
+  bigDesc: { fontSize: 14, color: colors.textMuted, marginTop: 2 },
+  chev: { fontSize: 36, color: colors.textLight, fontWeight: '300' },
+
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: spacing.xl },
   pinBox: { backgroundColor: colors.white, borderRadius: radius.lg, padding: spacing.xl },
   pinTitle: { fontSize: 20, fontWeight: '700', color: colors.text, textAlign: 'center', marginBottom: spacing.lg },
