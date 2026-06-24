@@ -259,11 +259,12 @@ def create_sale():
     d = request.get_json(force=True)
     payment_type = d.get("payment_type", "cash")
     items = d.get("items", [])
+    discount = max(0.0, float(d.get("discount", 0) or 0))
     if not items:
         return jsonify({"error": "no items"}), 400
 
     with get_conn() as conn:
-        total = 0.0
+        subtotal = 0.0
         resolved = []
         for it in items:
             row = conn.execute("SELECT * FROM products WHERE id = ?", (it["product_id"],)).fetchone()
@@ -271,11 +272,15 @@ def create_sale():
                 continue
             qty = int(it["qty"])
             line = row["price"] * qty
-            total += line
+            subtotal += line
             resolved.append((row, qty))
 
+        discount = min(discount, subtotal)  # never below zero
+        total = subtotal - discount
+
         cur = conn.execute(
-            "INSERT INTO sales (payment_type, total) VALUES (?,?)", (payment_type, total)
+            "INSERT INTO sales (payment_type, subtotal, discount, total) VALUES (?,?,?,?)",
+            (payment_type, subtotal, discount, total),
         )
         sale_id = cur.lastrowid
 
@@ -293,7 +298,121 @@ def create_sale():
                 (row["id"], "sale", "shop", -qty, f"sale #{sale_id}"),
             )
 
-    return jsonify({"id": sale_id, "total": round(total, 2), "payment_type": payment_type}), 201
+    return jsonify({"id": sale_id, "subtotal": round(subtotal, 2), "discount": round(discount, 2),
+                    "total": round(total, 2), "payment_type": payment_type}), 201
+
+
+@app.get("/api/sales")
+def list_sales():
+    """Sale history. Query: ?date=YYYY-MM-DD (default today), ?limit, ?all=1 (all dates)."""
+    date = request.args.get("date")
+    limit = int(request.args.get("limit", 100))
+    show_all = request.args.get("all") == "1"
+    with get_conn() as conn:
+        if show_all:
+            rows = conn.execute(
+                "SELECT * FROM sales ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        else:
+            day = date or "now"
+            arg = "now" if day == "now" else day
+            rows = conn.execute(
+                "SELECT * FROM sales WHERE date(created_at,'localtime') = date(?, 'localtime') ORDER BY created_at DESC LIMIT ?",
+                (arg, limit),
+            ).fetchall()
+    return jsonify([_serialize_sale(r) for r in rows])
+
+
+def _serialize_sale(row, items=None):
+    keys = row.keys()
+    return {
+        "id": row["id"],
+        "payment_type": row["payment_type"],
+        "subtotal": round(row["subtotal"] if "subtotal" in keys else row["total"], 2),
+        "discount": round(row["discount"] if "discount" in keys else 0, 2),
+        "total": round(row["total"], 2),
+        "voided": bool(row["voided"]) if "voided" in keys else False,
+        "created_at": row["created_at"],
+        "items": items,
+    }
+
+
+@app.get("/api/sales/<int:sale_id>")
+def get_sale(sale_id):
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM sales WHERE id = ?", (sale_id,)).fetchone()
+        if not row:
+            return jsonify({"error": "not found"}), 404
+        items = conn.execute(
+            "SELECT name, qty, price FROM sale_items WHERE sale_id = ?", (sale_id,)
+        ).fetchall()
+    return jsonify(_serialize_sale(row, [dict(i) for i in items]))
+
+
+@app.post("/api/sales/<int:sale_id>/void")
+def void_sale(sale_id):
+    """Void a sale and return its items to shop stock."""
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM sales WHERE id = ?", (sale_id,)).fetchone()
+        if not row:
+            return jsonify({"error": "not found"}), 404
+        if "voided" in row.keys() and row["voided"]:
+            return jsonify({"error": "already voided"}), 400
+        items = conn.execute("SELECT * FROM sale_items WHERE sale_id = ?", (sale_id,)).fetchall()
+        for it in items:
+            conn.execute(
+                "UPDATE products SET shop_qty = shop_qty + ?, updated_at=datetime('now') WHERE id = ?",
+                (it["qty"], it["product_id"]),
+            )
+            conn.execute(
+                "INSERT INTO stock_moves (product_id, kind, location, delta, note) VALUES (?,?,?,?,?)",
+                (it["product_id"], "void", "shop", it["qty"], f"void sale #{sale_id}"),
+            )
+        conn.execute("UPDATE sales SET voided = 1 WHERE id = ?", (sale_id,))
+    return jsonify({"ok": True, "voided": sale_id})
+
+
+@app.get("/api/reports")
+def reports():
+    """Sales analytics over a date range. Query: ?from=YYYY-MM-DD&to=YYYY-MM-DD (default last 7 days)."""
+    frm = request.args.get("from")
+    to = request.args.get("to")
+    with get_conn() as conn:
+        # default: last 7 days through today
+        if not frm:
+            frm = conn.execute("SELECT date('now','localtime','-6 days')").fetchone()[0]
+        if not to:
+            to = conn.execute("SELECT date('now','localtime')").fetchone()[0]
+
+        where = "voided = 0 AND date(created_at,'localtime') BETWEEN date(?) AND date(?)"
+        totals = conn.execute(
+            f"SELECT COUNT(*) AS cnt, COALESCE(SUM(total),0) AS total, COALESCE(SUM(discount),0) AS discount FROM sales WHERE {where}",
+            (frm, to),
+        ).fetchone()
+        by_type = conn.execute(
+            f"SELECT payment_type, COUNT(*) AS cnt, COALESCE(SUM(total),0) AS total FROM sales WHERE {where} GROUP BY payment_type",
+            (frm, to),
+        ).fetchall()
+        by_day = conn.execute(
+            f"SELECT date(created_at,'localtime') AS day, COUNT(*) AS cnt, COALESCE(SUM(total),0) AS total FROM sales WHERE {where} GROUP BY day ORDER BY day",
+            (frm, to),
+        ).fetchall()
+        top_items = conn.execute(
+            f"""SELECT si.name AS name, SUM(si.qty) AS qty, SUM(si.qty*si.price) AS revenue
+                FROM sale_items si JOIN sales s ON s.id = si.sale_id
+                WHERE s.voided = 0 AND date(s.created_at,'localtime') BETWEEN date(?) AND date(?)
+                GROUP BY si.name ORDER BY qty DESC LIMIT 10""",
+            (frm, to),
+        ).fetchall()
+    return jsonify({
+        "from": frm, "to": to,
+        "total": round(totals["total"], 2),
+        "count": totals["cnt"],
+        "discount": round(totals["discount"], 2),
+        "by_type": {r["payment_type"]: {"count": r["cnt"], "total": round(r["total"], 2)} for r in by_type},
+        "by_day": [{"day": r["day"], "count": r["cnt"], "total": round(r["total"], 2)} for r in by_day],
+        "top_items": [{"name": r["name"], "qty": r["qty"], "revenue": round(r["revenue"], 2)} for r in top_items],
+    })
 
 
 @app.get("/api/sales/summary")
@@ -302,11 +421,11 @@ def sales_summary():
     with get_conn() as conn:
         row = conn.execute(
             """SELECT COUNT(*) AS cnt, COALESCE(SUM(total),0) AS total
-               FROM sales WHERE created_at >= date('now','localtime')"""
+               FROM sales WHERE voided = 0 AND created_at >= date('now','localtime')"""
         ).fetchone()
         by_type = conn.execute(
             """SELECT payment_type, COUNT(*) AS cnt, COALESCE(SUM(total),0) AS total
-               FROM sales WHERE created_at >= date('now','localtime') GROUP BY payment_type"""
+               FROM sales WHERE voided = 0 AND created_at >= date('now','localtime') GROUP BY payment_type"""
         ).fetchall()
     return jsonify({
         "count": row["cnt"],
@@ -321,11 +440,11 @@ def dashboard():
     with get_conn() as conn:
         today = conn.execute(
             """SELECT COUNT(*) AS cnt, COALESCE(SUM(total),0) AS total
-               FROM sales WHERE created_at >= date('now','localtime')"""
+               FROM sales WHERE voided = 0 AND created_at >= date('now','localtime')"""
         ).fetchone()
         by_type = conn.execute(
             """SELECT payment_type, COALESCE(SUM(total),0) AS total
-               FROM sales WHERE created_at >= date('now','localtime') GROUP BY payment_type"""
+               FROM sales WHERE voided = 0 AND created_at >= date('now','localtime') GROUP BY payment_type"""
         ).fetchall()
 
         rows = conn.execute("SELECT * FROM products WHERE archived = 0").fetchall()

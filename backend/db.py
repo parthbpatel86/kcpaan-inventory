@@ -43,7 +43,10 @@ CREATE TABLE IF NOT EXISTS products (
 CREATE TABLE IF NOT EXISTS sales (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     payment_type TEXT NOT NULL,           -- 'card' | 'cash' | 'instore'
+    subtotal     REAL NOT NULL DEFAULT 0,
+    discount     REAL NOT NULL DEFAULT 0,
     total        REAL NOT NULL DEFAULT 0,
+    voided       INTEGER NOT NULL DEFAULT 0,
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -79,3 +82,10 @@ def init_db():
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(products)")}
         if "image_url" not in cols:
             conn.execute("ALTER TABLE products ADD COLUMN image_url TEXT")
+        scols = {r["name"] for r in conn.execute("PRAGMA table_info(sales)")}
+        if "subtotal" not in scols:
+            conn.execute("ALTER TABLE sales ADD COLUMN subtotal REAL NOT NULL DEFAULT 0")
+        if "discount" not in scols:
+            conn.execute("ALTER TABLE sales ADD COLUMN discount REAL NOT NULL DEFAULT 0")
+        if "voided" not in scols:
+            conn.execute("ALTER TABLE sales ADD COLUMN voided INTEGER NOT NULL DEFAULT 0")
