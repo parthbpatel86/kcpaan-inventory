@@ -74,6 +74,7 @@ def _serialize_product(row, demand_map, pop_map):
         "warehouse_qty": row["warehouse_qty"],
         "reorder_level": row["reorder_level"],
         "emoji": row["emoji"],
+        "image_url": row["image_url"] if "image_url" in row.keys() else None,
         "weekly_demand": round(demand, 1),
         "popularity": pop,
         "health": _health(row["shop_qty"], demand, row["reorder_level"]),
@@ -102,8 +103,8 @@ def create_product():
     d = request.get_json(force=True)
     with get_conn() as conn:
         cur = conn.execute(
-            """INSERT INTO products (name, sku, category, price, shop_qty, warehouse_qty, reorder_level, emoji)
-               VALUES (?,?,?,?,?,?,?,?)""",
+            """INSERT INTO products (name, sku, category, price, shop_qty, warehouse_qty, reorder_level, emoji, image_url)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
             (
                 d.get("name", "").strip(),
                 d.get("sku"),
@@ -113,6 +114,7 @@ def create_product():
                 int(d.get("warehouse_qty", 0)),
                 int(d.get("reorder_level", 5)),
                 d.get("emoji"),
+                d.get("image_url"),
             ),
         )
         pid = cur.lastrowid
@@ -122,10 +124,44 @@ def create_product():
     return jsonify(_serialize_product(row, demand_map, pop_map)), 201
 
 
+@app.post("/api/products/import")
+def import_products():
+    """Bulk import. Body: {items:[{name,price,shop_qty,...}], replace:bool}.
+    If replace=true, archives all existing products first (clean catalog swap)."""
+    d = request.get_json(force=True)
+    items = d.get("items", [])
+    replace = bool(d.get("replace", False))
+    created = 0
+    with get_conn() as conn:
+        if replace:
+            conn.execute("UPDATE products SET archived = 1")
+        for it in items:
+            name = (it.get("name") or "").strip()
+            if not name:
+                continue
+            conn.execute(
+                """INSERT INTO products (name, sku, category, price, shop_qty, warehouse_qty, reorder_level, emoji, image_url)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (
+                    name,
+                    it.get("sku"),
+                    it.get("category"),
+                    float(it.get("price", 0)),
+                    int(it.get("shop_qty", 0)),
+                    int(it.get("warehouse_qty", 0)),
+                    int(it.get("reorder_level", 5)),
+                    it.get("emoji"),
+                    it.get("image_url"),
+                ),
+            )
+            created += 1
+    return jsonify({"imported": created, "replaced": replace}), 201
+
+
 @app.put("/api/products/<int:pid>")
 def update_product(pid):
     d = request.get_json(force=True)
-    fields = ["name", "sku", "category", "price", "reorder_level", "emoji"]
+    fields = ["name", "sku", "category", "price", "reorder_level", "emoji", "image_url"]
     sets, vals = [], []
     for f in fields:
         if f in d:

@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS products (
     warehouse_qty INTEGER NOT NULL DEFAULT 0,
     reorder_level INTEGER NOT NULL DEFAULT 5,
     emoji         TEXT,
+    image_url     TEXT,
     archived      INTEGER NOT NULL DEFAULT 0,
     created_at    TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
@@ -74,3 +75,7 @@ CREATE INDEX IF NOT EXISTS idx_sales_created ON sales(created_at);
 def init_db():
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        # Lightweight migrations for existing DBs.
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(products)")}
+        if "image_url" not in cols:
+            conn.execute("ALTER TABLE products ADD COLUMN image_url TEXT")
