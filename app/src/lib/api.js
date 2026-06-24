@@ -57,6 +57,7 @@ export const api = {
   createSale: (data) =>
     req('/api/sales', { method: 'POST', body: JSON.stringify(data) }),
   salesSummary: () => req('/api/sales/summary'),
+  dashboard: () => req('/api/dashboard'),
   verifyPin: (pin) =>
     req('/api/verify-pin', { method: 'POST', body: JSON.stringify({ pin }) }),
 };

@@ -279,6 +279,40 @@ def sales_summary():
     })
 
 
+@app.get("/api/dashboard")
+def dashboard():
+    """One call for the home screen: today's sales + items needing reorder."""
+    with get_conn() as conn:
+        today = conn.execute(
+            """SELECT COUNT(*) AS cnt, COALESCE(SUM(total),0) AS total
+               FROM sales WHERE created_at >= date('now','localtime')"""
+        ).fetchone()
+        by_type = conn.execute(
+            """SELECT payment_type, COALESCE(SUM(total),0) AS total
+               FROM sales WHERE created_at >= date('now','localtime') GROUP BY payment_type"""
+        ).fetchall()
+
+        rows = conn.execute("SELECT * FROM products WHERE archived = 0").fetchall()
+        demand_map = _weekly_demand_map(conn)
+        pop_map = _popularity_map(conn)
+
+    products = [_serialize_product(r, demand_map, pop_map) for r in rows]
+    reorder = [p for p in products if p["health"] == "order"]
+    low = [p for p in products if p["health"] == "low"]
+    reorder.sort(key=lambda p: p["shop_qty"])
+
+    return jsonify({
+        "today": {
+            "count": today["cnt"],
+            "total": round(today["total"], 2),
+            "by_type": {r["payment_type"]: round(r["total"], 2) for r in by_type},
+        },
+        "reorder_count": len(reorder),
+        "low_count": len(low),
+        "reorder": reorder,  # full product objects, sorted most-urgent first
+    })
+
+
 @app.post("/api/verify-pin")
 def verify_pin():
     d = request.get_json(force=True)
