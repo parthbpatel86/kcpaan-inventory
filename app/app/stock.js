@@ -7,6 +7,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, spacing, shadow, HEALTH } from '../src/lib/theme';
 import { api } from '../src/lib/api';
+import ProductImage from '../src/components/ProductImage';
 
 const FILTERS = [
   { key: 'all', label: 'All' },
@@ -73,7 +74,7 @@ export default function Stock() {
       <View style={styles.rowWrap}>
         <Pressable style={styles.row} onPress={() => setEditProduct(item)}>
           <View style={[styles.rowAccent, { backgroundColor: health.color }]} />
-          <Text style={styles.rowEmoji}>{item.emoji || '🍃'}</Text>
+          <View style={{ marginLeft: 4 }}><ProductImage product={item} size={40} /></View>
           <View style={{ flex: 1 }}>
             <Text style={styles.rowName}>{item.name}</Text>
             <Text style={styles.rowCat}>{item.category || '—'} · ${item.price.toFixed(2)}</Text>
@@ -196,6 +197,7 @@ function EditModal({ product, onClose, onSaved }) {
   const [category, setCategory] = useState(product?.category || '');
   const [price, setPrice] = useState(product ? String(product.price) : '');
   const [emoji, setEmoji] = useState(product?.emoji || '🍃');
+  const [imageUrl, setImageUrl] = useState(product?.image_url || '');
   const [reorder, setReorder] = useState(product ? String(product.reorder_level) : '5');
   const [shopQty, setShopQty] = useState(isNew ? '0' : null);
   const [whQty, setWhQty] = useState(isNew ? '0' : null);
@@ -212,12 +214,14 @@ function EditModal({ product, onClose, onSaved }) {
       if (isNew) {
         await api.createProduct({
           name: name.trim(), category, price: parseFloat(price) || 0, emoji,
+          image_url: imageUrl.trim() || null,
           reorder_level: parseInt(reorder) || 5,
           shop_qty: parseInt(shopQty) || 0, warehouse_qty: parseInt(whQty) || 0,
         });
       } else {
         await api.updateProduct(product.id, {
           name: name.trim(), category, price: parseFloat(price) || 0, emoji,
+          image_url: imageUrl.trim() || null,
           reorder_level: parseInt(reorder) || 5,
         });
       }
@@ -290,6 +294,7 @@ function EditModal({ product, onClose, onSaved }) {
               <View style={{ flex: 1 }}><Field label="Price ($)" value={price} onChangeText={setPrice} keyboardType="decimal-pad" placeholder="3.00" /></View>
               <View style={{ flex: 1 }}><Field label="Reorder level" value={reorder} onChangeText={setReorder} keyboardType="number-pad" placeholder="5" /></View>
             </View>
+            <Field label="Image URL (optional)" value={imageUrl} onChangeText={setImageUrl} placeholder="https://…" autoCapitalize="none" />
 
             {isNew && (
               <View style={styles.fieldRow}>

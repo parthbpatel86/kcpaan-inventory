@@ -8,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, spacing, shadow, HEALTH } from '../src/lib/theme';
 import { api } from '../src/lib/api';
 import { useCart } from '../src/lib/cart';
+import ProductImage from '../src/components/ProductImage';
 
 export default function POS() {
   const router = useRouter();
@@ -83,7 +84,7 @@ export default function POS() {
       <View style={[styles.card, { borderLeftColor: health.color }, inCart > 0 && styles.cardActive]}>
         <Pressable style={styles.cardTapZone} onPress={() => cart.addItem(item)} onLongPress={() => cart.removeItem(item.id)} delayLongPress={350}>
           <View style={styles.cardTop}>
-            <Text style={styles.cardEmoji}>{item.emoji || '🍃'}</Text>
+            <ProductImage product={item} size={44} />
             <View style={[styles.healthDot, { backgroundColor: health.color }]} />
           </View>
           <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
@@ -148,7 +149,7 @@ export default function POS() {
                         const inCart = cart.items[item.id]?.qty || 0;
                         return (
                           <Pressable key={item.id} style={[styles.fav, inCart > 0 && styles.favActive]} onPress={() => cart.addItem(item)} onLongPress={() => cart.removeItem(item.id)} delayLongPress={350}>
-                            <Text style={styles.favEmoji}>{item.emoji || '🍃'}</Text>
+                            <ProductImage product={item} size={40} />
                             <Text style={styles.favName} numberOfLines={1}>{item.name}</Text>
                             <Text style={styles.favPrice}>${item.price.toFixed(2)}</Text>
                             {inCart > 0 && <View style={styles.favBadge}><Text style={styles.favBadgeTxt}>{inCart}</Text></View>}
@@ -211,7 +212,7 @@ function CartPanel({ cart, onCheckout, onQuickCash, submitting }) {
           contentContainerStyle={{ gap: spacing.sm, paddingBottom: spacing.md }}
           renderItem={({ item }) => (
             <View style={styles.lineItem}>
-              <Text style={styles.lineEmoji}>{item.product.emoji || '🍃'}</Text>
+              <ProductImage product={item.product} size={36} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.lineName} numberOfLines={1}>{item.product.name}</Text>
                 <Text style={styles.lineSub}>${item.product.price.toFixed(2)} × {item.qty}</Text>
