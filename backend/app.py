@@ -475,9 +475,13 @@ def verify_pin():
     return jsonify({"ok": str(d.get("pin", "")) == STOCK_PIN})
 
 
-# Initialise DB + seed on import (safe/idempotent), so gunicorn workers are ready.
+# Initialise DB on import so gunicorn workers are ready.
 init_db()
-seed_module.seed_if_empty()
+# Only auto-seed sample products on local SQLite dev. In production (Postgres),
+# never seed — the real catalog lives there and an empty table is not a cue to
+# overwrite it with samples.
+if not os.environ.get("DATABASE_URL"):
+    seed_module.seed_if_empty()
 
 
 if __name__ == "__main__":
