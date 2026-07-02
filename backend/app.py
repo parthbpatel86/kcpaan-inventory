@@ -9,6 +9,7 @@ Demand color coding: weekly demand = units sold over last 28 days / 4.
   low      -> shop_qty >= ~0.4 week of demand
   order    -> below that (reorder ASAP)
 """
+import hashlib
 import os
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -19,7 +20,11 @@ import seed as seed_module
 app = Flask(__name__)
 CORS(app)
 
-STOCK_PIN = os.environ.get("KC_STOCK_PIN", "1031")
+
+def _get_pin(conn):
+    """PIN lives in the settings table (seeded by init_db); env is a fallback."""
+    row = conn.execute("SELECT value FROM settings WHERE key = 'stock_pin'").fetchone()
+    return row["value"] if row else os.environ.get("KC_STOCK_PIN", "0000")
 
 
 def _weekly_demand_map(conn):
@@ -472,7 +477,14 @@ def dashboard():
 @app.post("/api/verify-pin")
 def verify_pin():
     d = request.get_json(force=True)
-    return jsonify({"ok": str(d.get("pin", "")) == STOCK_PIN})
+    with get_conn() as conn:
+        pin = _get_pin(conn)
+    ok = str(d.get("pin", "")) == pin
+    resp = {"ok": ok}
+    if ok:
+        # Client caches this to verify the PIN offline when the server is down.
+        resp["pin_hash"] = hashlib.sha256(pin.encode()).hexdigest()
+    return jsonify(resp)
 
 
 # Initialise DB on import so gunicorn workers are ready.

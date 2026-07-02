@@ -6,6 +6,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, spacing, shadow } from '../src/lib/theme';
 import { api } from '../src/lib/api';
+import { verifyPin } from '../src/lib/pin';
 
 export default function Home() {
   const router = useRouter();
@@ -31,17 +32,18 @@ export default function Home() {
   async function submitPin() {
     setChecking(true);
     try {
-      const res = await api.verifyPin(pin);
+      const res = await verifyPin(pin);
       if (res.ok) {
         setPinVisible(false);
         setPin('');
         router.push(pinTarget);
+      } else if (res.noCache) {
+        Alert.alert('Offline', 'No connection and no saved PIN yet. Connect to the internet and unlock once first.');
+        setPin('');
       } else {
         Alert.alert('Wrong PIN', 'That PIN is not correct.');
         setPin('');
       }
-    } catch (e) {
-      Alert.alert('Connection error', String(e.message || e));
     } finally {
       setChecking(false);
     }

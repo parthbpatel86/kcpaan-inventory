@@ -10,8 +10,7 @@ import { api } from '../src/lib/api';
 import { useCart } from '../src/lib/cart';
 import ProductImage from '../src/components/ProductImage';
 import { createSaleResilient, syncPending, pendingCount } from '../src/lib/offline';
-
-const STOCK_PIN = '1031';
+import { verifyPin } from '../src/lib/pin';
 
 export default function POS() {
   const router = useRouter();
@@ -329,15 +328,22 @@ function CheckoutModal({ visible, cart, cartTotal, discount, submitting, onClose
   );
 }
 
-const DISCOUNT_PIN = '1031';
-
 function DiscountPinModal({ pinVisible, discountVisible, maxAmount, onPinOk, onPinCancel, onApply, onDiscountCancel }) {
   const [pin, setPin] = useState('');
   const [amt, setAmt] = useState('');
+  const [checking, setChecking] = useState(false);
 
-  function submitPin() {
-    if (pin === DISCOUNT_PIN) { setPin(''); onPinOk(); }
-    else { Alert.alert('Wrong PIN'); setPin(''); }
+  async function submitPin() {
+    if (checking) return;
+    setChecking(true);
+    try {
+      const res = await verifyPin(pin);
+      if (res.ok) { setPin(''); onPinOk(); }
+      else if (res.noCache) { Alert.alert('Offline', 'No connection and no saved PIN yet. Connect once first.'); setPin(''); }
+      else { Alert.alert('Wrong PIN'); setPin(''); }
+    } finally {
+      setChecking(false);
+    }
   }
   function apply() {
     const v = Math.min(parseFloat(amt) || 0, maxAmount);

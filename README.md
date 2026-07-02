@@ -19,7 +19,7 @@ Install: download on the Android device → allow "install from unknown sources"
 - Each card shows a **demand color dot** based on stock vs weekly sales:
   - 🟢 healthy · 🟡 getting low · 🔴 order ASAP
 
-### 📦 Stock Management — PIN `1031`
+### 📦 Stock Management — PIN-gated
 - Shop floor **and** warehouse quantities per product
 - Add / remove / modify stock at either location
 - **Move** stock warehouse → shop
@@ -38,7 +38,7 @@ Android app (Expo SDK 56 / React Native)  ──HTTPS──▶  Flask + SQLite A
 
 - **Backend:** https://kcpaan-inventory-api.onrender.com (Render free tier, Docker)
 - **Shared DB:** all app installs read/write the same backend, so stock and sales are consistent across devices.
-- **Stock PIN:** `1031` (set via `KC_STOCK_PIN` env var on Render).
+- **Stock PIN:** stored in the database (`settings` table); verified server-side, cached as a SHA-256 hash on device for offline unlock.
 
 ## Backend API
 

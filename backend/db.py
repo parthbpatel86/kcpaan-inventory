@@ -181,6 +181,10 @@ CREATE TABLE IF NOT EXISTS stock_moves (
     note       TEXT,
     created_at {ts_type} NOT NULL {ts_default}
 );
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_sale_items_product ON sale_items(product_id);
 CREATE INDEX IF NOT EXISTS idx_sale_items_sale ON sale_items(sale_id);
 CREATE INDEX IF NOT EXISTS idx_sales_created ON sales(created_at);
@@ -188,11 +192,19 @@ CREATE INDEX IF NOT EXISTS idx_sales_created ON sales(created_at);
 
 
 def init_db():
+    default_pin = os.environ.get("KC_STOCK_PIN", "0000")
     if USE_PG:
         import psycopg
         conn = psycopg.connect(DATABASE_URL, autocommit=True)
         with conn.cursor() as cur:
             cur.execute(_schema(True))
+            # Deny-all via Supabase's anon-key REST path; the app's password
+            # login bypasses RLS so the API is unaffected.
+            cur.execute("ALTER TABLE settings ENABLE ROW LEVEL SECURITY")
+            cur.execute(
+                "INSERT INTO settings (key, value) VALUES ('stock_pin', %s) ON CONFLICT (key) DO NOTHING",
+                (default_pin,),
+            )
         conn.close()
     else:
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -210,5 +222,9 @@ def init_db():
         ]:
             if col not in scols:
                 conn.execute(ddl)
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES ('stock_pin', ?)",
+            (default_pin,),
+        )
         conn.commit()
         conn.close()

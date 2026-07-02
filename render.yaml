@@ -8,8 +8,6 @@ services:
     envVars:
       - key: KC_DB_PATH
         value: /data/kcpaan.db
-      - key: KC_STOCK_PIN
-        value: "1031"
     disk:
       name: kcpaan-data
       mountPath: /data
