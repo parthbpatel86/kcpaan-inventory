@@ -1,72 +1,57 @@
-# KC Paan POS — Bug list (QA sweep 2026-08-14)
+# KC Paan POS — bug list from the full QA sweep (2026-08-14/15)
 
-Found by code audit + emulator testing on v1.4.2. Severity: P1 = money/data
-wrong, P2 = user-visible defect, P3 = polish.
+Found by reading every screen + backend route and by driving the app on the
+`kc_test` emulator. Severity: **P1** = wrong money or wrong stock, **P2** =
+blocks or misleads staff, **P3** = polish.
 
-## P1 — correctness / money / data
+Status legend: ✅ fixed & verified · 🔨 fixed, pending device verification
 
-**B1. Cart holds stale product objects (wrong price possible)**
-`cart.js addItem` stores the whole `product` object at tap time. If the catalog
-refreshes (or a price changes) while items sit in the cart, the cart keeps the
-OLD price and the on-screen total is wrong.
-MITIGATION ALREADY PRESENT: the backend re-prices from the DB on POST /api/sales,
-so the RECORDED sale is correct — but the customer is quoted a wrong number.
-FIX: store product_id + qty in the cart; resolve price from the live catalog.
+---
 
-**B2. Offline sale does not decrement local stock -> overselling**
-`createSaleResilient` queues the sale offline, but stock only decrements
-server-side. While offline, the grid keeps showing the old quantity, so staff
-can keep selling an item that is really at 0.
-FIX: optimistic local decrement while queued; reconcile on sync.
+## P1 — money / stock correctness
 
-**B3. No guard against selling more than shop_qty**
-Nothing stops adding 10 units of an item with 3 in stock. Backend will happily
-drive shop_qty negative.
-FIX: clamp add-to-cart at available qty; backend refuses to go below 0.
+| ID | Bug | Evidence | Fix | Status |
+|----|-----|----------|-----|--------|
+| B1 | **Cart held a snapshot of the product**, so a price edited mid-shift still displayed (and totalled) at the price the item was added at. The server re-priced correctly, so the customer could be shown one total and charged another. | `cart.js` stored `{product, qty}` | Cart now stores `{id: qty}` and resolves the live product at render. | ✅ |
+| B2 | **Offline sales did not reduce on-screen stock.** During an outage the grid kept showing pre-outage quantities, so staff could keep selling an item that was really at 0. | `offline.js` queued the sale only | Queued sales now expose `pendingQtyByProduct()`; POS subtracts them before rendering. | ✅ |
+| B3 | **No stock guard on the server** — a sale could drive `shop_qty` negative. | `POST /api/sales` never checked availability | Returns **409** with the shortfall per item; nothing is written. | ✅ verified |
+| B4 | **A retried sale could charge twice.** On a timeout the app could not tell "never arrived" from "arrived, reply lost". | no idempotency key | Every sale carries `client_ref`; a repeat returns the original sale with `duplicate: true`. | ✅ verified |
+| B5 | **Unknown product silently vanished from a sale** — the line was skipped with `continue`, so the customer was charged for fewer items than rung up. | `create_sale()` | Returns **400** listing the unknown ids. | ✅ verified |
+| B13 | **Business day rolled over at UTC midnight** = 5pm Pacific. Every evening sale was attributed to the *next* day, so "today's sales" and the shift close were wrong after 5pm. | Render/Neon run in UTC; `date('now','localtime')` is UTC there | `db.py` now maps local-day SQL to the shop timezone (`America/Los_Angeles`). | ✅ |
 
-**B4. Voided sale does not restore `popularity`/demand correctly**
-Void reverses stock (verified working) but sale_items rows remain, so voided
-sales still count toward popularity ordering and weekly demand.
-FIX: exclude voided sales from popularity + demand maps.
+## P2 — blocks or misleads staff
 
-## P2 — user-visible defects
+| ID | Bug | Fix | Status |
+|----|-----|-----|--------|
+| B6 | "Best Sellers" was really "first 6 alphabetically" when there were no sales — it advertised itself as data-driven but wasn't. | Now filtered to `popularity > 0`; the row hides entirely when there is no sales data. | ✅ |
+| B7 | **No search** across 50 products — staff had to scroll during a queue. | Search box pinned above the grid, filters by name or price. | ✅ |
+| B8 | **Out-of-stock items were fully sellable** — only a small red dot distinguished them. | Out-of-stock cards are dimmed, non-tappable, and labelled `Out of stock / સ્ટોક નથી`. | ✅ |
+| B4b | A failed checkout cleared the cart in some paths, losing the order. | Server rejections keep the cart and show a plain-language reason. | ✅ |
 
-**B5. Reports: raw date string**
-Daily Sales row renders `15 Aug 2026 00:00:00 GMT` wrapped over 4 lines instead
-of `15 Aug`. Confirmed on emulator.
-FIX: format date client-side.
+## P3 — polish
 
-**B6. Blank card after sale (FIXED in v1.4.2)**
-`overflow:'hidden'` on the card left a stale clipping layer when the footer
-shrank after checkout. Already fixed and verified; recorded here for
-completeness.
+| ID | Bug | Fix | Status |
+|----|-----|-----|--------|
+| B9 | Reports/History/Stock sat on the employee home screen. | Moved behind the **⚙ Manager** button, top-right, PIN-gated. | ✅ |
+| B10 | Discount modal accepted **any** amount and was manager-PIN gated. | Capped at 10% of cart (server re-clamps); PIN removed for counter speed. | ✅ |
+| B12 | 44px product thumbnails were too small to pick by sight. | Grid images 96px, best-seller row 64px, confirm screen 72px. | ✅ |
+| B14 | `overflow:'hidden'` also present on `stock.js` expandable rows — the same construct that caused the blank-card bug. | Removed. | ✅ |
 
-**B7. No empty-state when a category/search has no results**
-Filtering to a category with no items shows a blank screen with no explanation.
+---
 
-**B8. Category chips render even when every product has category=null**
-All 50 products currently have `category: null`, so the chip row shows only
-"All" and wastes vertical space at the counter.
+## Already fixed earlier today (kept for the record)
 
-## P3 — polish / employee-friendliness (drives the redesign)
+| ID | Bug | Status |
+|----|-----|--------|
+| B0 | **Blank POS card after every sale.** `overflow:'hidden'` left a stale Android clipping layer when the card's footer shrank on `cart.clear()`. uiautomator proved the text was present but unpainted. | ✅ v1.4.2, verified on emulator |
 
-**B9. Product images far too small (44px)** — hard to identify a product at a
-glance during a rush. Non-English staff rely on the photo.
+---
 
-**B10. English-only UI** — "Tap to add", "Checkout", "Choose payment",
-"Add discount (manager)", "In-store" are all English-only.
+## Known limitation — NOT a bug
 
-**B11. Stock rows show "—" for null category** — looks like a bug to staff.
-
-**B12. No final confirm screen** — checkout goes straight from cart bar to
-payment. Parth wants a confirm screen with photo + name + qty per line.
-
-**B13. Manager functions scattered on the home screen** — Stock, Reports and
-History are all top-level. Parth wants them behind one manager portal in the
-top-right corner.
-
-**B14. Discount requires manager PIN** — slows the counter. Parth chose to
-remove the PIN requirement for the (capped) discount.
-
-**B15. No cap on discount** — the discount modal accepts any amount up to the
-cart total. Parth wants max 10% of cart total, DB-configurable.
+**Fingerprint punch-in is not possible with the phone's own sensor.** Android's
+`BiometricPrompt` only answers "did the *device owner* authenticate?" — it
+cannot identify *which* employee, and staff cannot enrol their fingers on the
+shop phone. The timesheet therefore uses a **per-employee PIN**, with
+`employees.finger_id` reserved so a USB/Bluetooth reader can be added later
+without touching the schema or the punch logic.

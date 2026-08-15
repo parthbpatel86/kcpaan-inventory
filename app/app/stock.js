@@ -390,7 +390,9 @@ const styles = StyleSheet.create({
   errorBar: { backgroundColor: '#FDECEA', padding: spacing.sm, paddingHorizontal: spacing.lg },
   errorTxt: { color: colors.order, fontSize: 13 },
 
-  rowWrap: { backgroundColor: colors.surface, borderRadius: radius.md, overflow: 'hidden', ...shadow.card },
+  // No overflow:'hidden' — these rows expand/collapse, and the stale clipping
+  // layer it creates paints blank (see audit-trail/blank-pos-card-2026-08-14.md).
+  rowWrap: { backgroundColor: colors.surface, borderRadius: radius.md, ...shadow.card },
   row: { flexDirection: 'row', alignItems: 'center', padding: spacing.md, gap: spacing.sm },
   rowAccent: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 5 },
   rowEmoji: { fontSize: 28, marginLeft: 4 },

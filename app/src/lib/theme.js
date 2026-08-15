@@ -21,10 +21,14 @@ export const colors = {
   textMuted: '#6B7770',
   textLight: '#9AA59E',
 
-  // Payment chips
+  // Payment chips — one distinct colour per payment button so staff can pick
+  // by colour + icon without reading the label.
   card: '#3D6FE0',
   cash: '#2BA84A',
   instore: '#8B5CF6',
+  employee: '#C2571E',
+
+  danger: '#E0473B',
 
   white: '#FFFFFF',
 };

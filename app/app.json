@@ -3,7 +3,7 @@
     "name": "KC Paan POS",
     "slug": "kcpaan-inventory",
     "scheme": "kcpaanpos",
-    "version": "1.4.2",
+    "version": "1.5.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -13,7 +13,7 @@
     },
     "android": {
       "package": "com.kcpaan.pos",
-      "versionCode": 7,
+      "versionCode": 8,
       "adaptiveIcon": {
         "backgroundColor": "#0F7B5A",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -33,6 +33,14 @@
       "eas": {
         "projectId": ""
       }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 8000
     }
   }
 }

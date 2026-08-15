@@ -1,4 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+// Home — deliberately employee-first.
+//
+// Parth: "Move things for manager to manager portal on upper right corner."
+// So staff see exactly two big choices (sell / clock), and everything a manager
+// needs sits behind the ⚙ button top-right, gated by the stock PIN.
+import { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, Pressable, Modal, TextInput, ActivityIndicator, Alert, ScrollView,
 } from 'react-native';
@@ -7,11 +12,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, spacing, shadow } from '../src/lib/theme';
 import { api } from '../src/lib/api';
 import { verifyPin } from '../src/lib/pin';
+import { L } from '../src/lib/labels';
 
 export default function Home() {
   const router = useRouter();
   const [pinVisible, setPinVisible] = useState(false);
-  const [pinTarget, setPinTarget] = useState('/stock'); // where to go after PIN
   const [pin, setPin] = useState('');
   const [checking, setChecking] = useState(false);
   const [dash, setDash] = useState(null);
@@ -20,14 +25,7 @@ export default function Home() {
     try { setDash(await api.dashboard()); } catch (e) { /* offline — show nothing */ }
   }, []);
 
-  // Refresh dashboard every time the home screen regains focus.
   useFocusEffect(useCallback(() => { loadDash(); }, [loadDash]));
-
-  function askPin(target) {
-    setPinTarget(target);
-    setPin('');
-    setPinVisible(true);
-  }
 
   async function submitPin() {
     setChecking(true);
@@ -36,7 +34,7 @@ export default function Home() {
       if (res.ok) {
         setPinVisible(false);
         setPin('');
-        router.push(pinTarget);
+        router.push('/manager');
       } else if (res.noCache) {
         Alert.alert('Offline', 'No connection and no saved PIN yet. Connect to the internet and unlock once first.');
         setPin('');
@@ -52,92 +50,68 @@ export default function Home() {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={styles.scroll}>
+        {/* Manager door — top right, small on purpose so staff don't wander in */}
+        <View style={styles.topBar}>
+          <View style={{ flex: 1 }} />
+          <Pressable style={styles.mgrBtn} onPress={() => { setPin(''); setPinVisible(true); }} hitSlop={10}>
+            <Text style={styles.mgrEmoji}>⚙️</Text>
+            <Text style={styles.mgrTxt}>{L.manager.en}</Text>
+          </Pressable>
+        </View>
+
         <View style={styles.header}>
           <Text style={styles.brand}>KC Paan</Text>
-          <Text style={styles.sub}>Point of Sale & Inventory</Text>
         </View>
 
-        {/* Manager glance: today's sales + reorder alert */}
-        <View style={styles.glance}>
-          <View style={styles.todayCard}>
-            <Text style={styles.todayLabel}>Today's Sales</Text>
-            <Text style={styles.todayValue}>
-              ${dash ? dash.today.total.toFixed(2) : '—'}
-            </Text>
-            <Text style={styles.todayCount}>
-              {dash ? `${dash.today.count} sale${dash.today.count === 1 ? '' : 's'}` : ' '}
-            </Text>
-          </View>
-
-          <Pressable
-            style={[styles.reorderCard, dash && dash.reorder_count > 0 ? styles.reorderAlert : styles.reorderOk]}
-            onPress={() => askPin('/stock?filter=reorder')}
-          >
-            <Text style={styles.reorderNum}>{dash ? dash.reorder_count : '—'}</Text>
-            <Text style={styles.reorderLabel}>
-              {dash && dash.reorder_count > 0 ? 'Need reorder →' : 'All stocked ✓'}
-            </Text>
-          </Pressable>
-        </View>
-
-        {/* Primary actions */}
-        <Pressable
-          style={({ pressed }) => [styles.bigCard, styles.posCard, pressed && styles.pressed]}
-          onPress={() => router.push('/pos')}
-        >
-          <Text style={styles.bigEmoji}>🛒</Text>
+        {/* The two things an employee ever needs */}
+        <Pressable style={styles.primaryTile} onPress={() => router.push('/pos')}>
+          <Text style={styles.primaryEmoji}>🛒</Text>
           <View style={{ flex: 1 }}>
-            <Text style={styles.bigTitle}>Shop Sales</Text>
-            <Text style={styles.bigDesc}>Ring up orders, take payment</Text>
+            <Text style={styles.primaryTitle}>Shop Sales</Text>
+            <Text style={styles.primarySub}>વેચાણ · Ring up orders</Text>
           </View>
           <Text style={styles.chev}>›</Text>
         </Pressable>
 
-        <Pressable
-          style={({ pressed }) => [styles.bigCard, styles.stockCard, pressed && styles.pressed]}
-          onPress={() => askPin('/stock')}
-        >
-          <Text style={styles.bigEmoji}>📦</Text>
+        <Pressable style={[styles.primaryTile, styles.clockTile]} onPress={() => router.push('/punch')}>
+          <Text style={styles.primaryEmoji}>🕐</Text>
           <View style={{ flex: 1 }}>
-            <Text style={styles.bigTitle}>Stock Management</Text>
-            <Text style={styles.bigDesc}>Inventory & warehouse · PIN</Text>
+            <Text style={styles.primaryTitle}>Time Clock</Text>
+            <Text style={styles.primarySub}>{L.punchIn.gu} / {L.punchOut.gu} · Punch in & out</Text>
           </View>
           <Text style={styles.chev}>›</Text>
         </Pressable>
 
-        <View style={styles.secondaryRow}>
-          <Pressable style={({ pressed }) => [styles.secCard, pressed && styles.pressed]} onPress={() => router.push('/history')}>
-            <Text style={styles.secEmoji}>🧾</Text>
-            <Text style={styles.secTitle}>History</Text>
-          </Pressable>
-          <Pressable style={({ pressed }) => [styles.secCard, pressed && styles.pressed]} onPress={() => askPin('/reports')}>
-            <Text style={styles.secEmoji}>📊</Text>
-            <Text style={styles.secTitle}>Reports · PIN</Text>
-          </Pressable>
-        </View>
+        {/* Reorder alert is operationally useful to staff too */}
+        {dash?.reorder_count > 0 && (
+          <View style={styles.alertCard}>
+            <Text style={styles.alertNum}>{dash.reorder_count}</Text>
+            <Text style={styles.alertTxt}>items need reorder</Text>
+          </View>
+        )}
       </ScrollView>
 
       <Modal visible={pinVisible} transparent animationType="fade" onRequestClose={() => setPinVisible(false)}>
         <View style={styles.modalBg}>
-          <View style={styles.pinBox}>
-            <Text style={styles.pinTitle}>Enter Stock PIN</Text>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{L.manager.en} PIN</Text>
             <TextInput
-              style={styles.pinInput}
+              style={styles.modalInput}
               value={pin}
               onChangeText={setPin}
               keyboardType="number-pad"
               secureTextEntry
               maxLength={8}
               autoFocus
-              placeholder="••••"
-              placeholderTextColor={colors.textLight}
+              textAlign="center"
+              onSubmitEditing={submitPin}
             />
-            <View style={styles.pinRow}>
-              <Pressable style={[styles.pinBtn, styles.pinCancel]} onPress={() => { setPinVisible(false); setPin(''); }}>
-                <Text style={styles.pinCancelTxt}>Cancel</Text>
+            <View style={styles.modalBtns}>
+              <Pressable style={styles.modalCancel} onPress={() => setPinVisible(false)} disabled={checking}>
+                <Text style={styles.modalCancelTxt}>{L.cancel.en}</Text>
               </Pressable>
-              <Pressable style={[styles.pinBtn, styles.pinGo]} onPress={submitPin} disabled={checking}>
-                {checking ? <ActivityIndicator color={colors.white} /> : <Text style={styles.pinGoTxt}>Unlock</Text>}
+              <Pressable style={styles.modalOk} onPress={submitPin} disabled={checking}>
+                {checking ? <ActivityIndicator color={colors.white} /> : <Text style={styles.modalOkTxt}>Unlock</Text>}
               </Pressable>
             </View>
           </View>
@@ -149,50 +123,34 @@ export default function Home() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.primary },
-  scroll: { padding: spacing.lg, gap: spacing.lg },
-  header: { paddingTop: spacing.lg, alignItems: 'center' },
-  brand: { fontSize: 38, fontWeight: '800', color: colors.white, letterSpacing: 0.5 },
-  sub: { fontSize: 15, color: colors.primaryLight, marginTop: 2 },
+  scroll: { padding: spacing.lg, paddingTop: spacing.md },
 
-  glance: { flexDirection: 'row', gap: spacing.md },
-  todayCard: { flex: 1.4, backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, ...shadow.card },
-  todayLabel: { fontSize: 13, color: colors.textMuted, fontWeight: '600' },
-  todayValue: { fontSize: 34, fontWeight: '800', color: colors.primary, marginTop: 2 },
-  todayCount: { fontSize: 13, color: colors.textLight, marginTop: 2 },
-  reorderCard: { flex: 1, borderRadius: radius.lg, padding: spacing.lg, justifyContent: 'center', alignItems: 'center', ...shadow.card },
-  reorderOk: { backgroundColor: colors.healthy },
-  reorderAlert: { backgroundColor: colors.order },
-  reorderNum: { fontSize: 34, fontWeight: '800', color: colors.white },
-  reorderLabel: { fontSize: 13, color: colors.white, fontWeight: '700', marginTop: 2, textAlign: 'center' },
+  topBar: { flexDirection: 'row', alignItems: 'center' },
+  mgrBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.xl },
+  mgrEmoji: { fontSize: 18 },
+  mgrTxt: { color: colors.white, fontWeight: '800', fontSize: 14 },
 
-  bigCard: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.lg,
-    borderRadius: radius.xl, padding: spacing.xl, ...shadow.card,
-  },
-  posCard: { backgroundColor: colors.white },
-  stockCard: { backgroundColor: colors.gold },
-  pressed: { opacity: 0.85, transform: [{ scale: 0.99 }] },
-  bigEmoji: { fontSize: 46 },
-  bigTitle: { fontSize: 24, fontWeight: '800', color: colors.text },
-  bigDesc: { fontSize: 14, color: colors.textMuted, marginTop: 2 },
-  chev: { fontSize: 36, color: colors.textLight, fontWeight: '300' },
-  secondaryRow: { flexDirection: 'row', gap: spacing.md },
-  secCard: { flex: 1, backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, alignItems: 'center', ...shadow.card },
-  secEmoji: { fontSize: 30 },
-  secTitle: { fontSize: 15, fontWeight: '700', color: colors.text, marginTop: spacing.xs },
+  header: { alignItems: 'center', marginTop: spacing.lg, marginBottom: spacing.xl },
+  brand: { color: colors.white, fontSize: 44, fontWeight: '900' },
 
-  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: spacing.xl },
-  pinBox: { backgroundColor: colors.white, borderRadius: radius.lg, padding: spacing.xl },
-  pinTitle: { fontSize: 20, fontWeight: '700', color: colors.text, textAlign: 'center', marginBottom: spacing.lg },
-  pinInput: {
-    borderWidth: 2, borderColor: colors.border, borderRadius: radius.md, fontSize: 28,
-    textAlign: 'center', letterSpacing: 8, paddingVertical: spacing.md, color: colors.text,
-    marginBottom: spacing.lg,
-  },
-  pinRow: { flexDirection: 'row', gap: spacing.md },
-  pinBtn: { flex: 1, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: 'center' },
-  pinCancel: { backgroundColor: colors.surfaceAlt },
-  pinCancelTxt: { color: colors.textMuted, fontWeight: '700', fontSize: 16 },
-  pinGo: { backgroundColor: colors.primary },
-  pinGoTxt: { color: colors.white, fontWeight: '700', fontSize: 16 },
+  primaryTile: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.xl, marginBottom: spacing.lg, ...shadow.card },
+  clockTile: { backgroundColor: colors.gold },
+  primaryEmoji: { fontSize: 44 },
+  primaryTitle: { fontSize: 26, fontWeight: '900', color: colors.text },
+  primarySub: { fontSize: 14, color: colors.textMuted, marginTop: 2 },
+  chev: { fontSize: 34, color: colors.textLight },
+
+  alertCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.order, borderRadius: radius.lg, padding: spacing.lg },
+  alertNum: { color: colors.white, fontSize: 32, fontWeight: '900' },
+  alertTxt: { color: colors.white, fontSize: 15, fontWeight: '700' },
+
+  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
+  modalCard: { width: '100%', backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.xl },
+  modalTitle: { fontSize: 20, fontWeight: '800', color: colors.text, textAlign: 'center' },
+  modalInput: { borderWidth: 2, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md, fontSize: 30, letterSpacing: 8, marginTop: spacing.lg, color: colors.text },
+  modalBtns: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
+  modalCancel: { flex: 1, paddingVertical: spacing.md, borderRadius: radius.md, backgroundColor: colors.surfaceAlt, alignItems: 'center' },
+  modalCancelTxt: { fontSize: 16, fontWeight: '800', color: colors.textMuted },
+  modalOk: { flex: 1, paddingVertical: spacing.md, borderRadius: radius.md, backgroundColor: colors.primary, alignItems: 'center' },
+  modalOkTxt: { fontSize: 16, fontWeight: '800', color: colors.white },
 });
