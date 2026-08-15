@@ -429,7 +429,7 @@ const styles = StyleSheet.create({
   catTxtActive: { color: colors.white },
 
   // Product card
-  card: { flex: 1, backgroundColor: colors.surface, borderRadius: radius.md, borderLeftWidth: 5, minHeight: 130, ...shadow.card, overflow: 'hidden' },
+  card: { flex: 1, backgroundColor: colors.surface, borderRadius: radius.md, borderLeftWidth: 5, minHeight: 130, ...shadow.card },
   cardActive: { borderColor: colors.primary, borderWidth: 1, borderLeftWidth: 5 },
   cardTapZone: { padding: spacing.md, flex: 1 },
   cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
