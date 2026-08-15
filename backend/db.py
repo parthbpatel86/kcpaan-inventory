@@ -16,6 +16,9 @@ from contextlib import contextmanager
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 USE_PG = bool(DATABASE_URL)
+# The shop's wall-clock timezone. The business day must roll over at local
+# midnight, not at UTC midnight (which is 5pm the previous day in California).
+SHOP_TZ = os.environ.get("SHOP_TZ", "America/Los_Angeles")
 DB_PATH = os.environ.get("KC_DB_PATH", os.path.join(os.path.dirname(__file__), "data", "kcpaan.db"))
 
 
@@ -31,15 +34,28 @@ def _to_pg_sql(sql):
     s = s.replace("datetime('now')", "now()")
     # date('now','localtime', '-6 days') and similar -> handled below generically
     s = re.sub(r"date\('now',\s*'localtime',\s*'([^']*)'\)", lambda m: _pg_date_interval(m.group(1)), s)
-    s = s.replace("date('now','localtime')", "current_date")
-    s = s.replace("date('now', 'localtime')", "current_date")
-    # date(<col>,'localtime') -> (<col>)::date    (we only use it on timestamp cols)
-    s = re.sub(r"date\(([^,]+),\s*'localtime'\)", r"(\1)::date", s)
+    # 'localtime' means the SHOP's local day, not the server's UTC day. Render/Neon
+    # run in UTC, so mapping these to current_date/::date would roll the business
+    # day over at 5pm Pacific and mis-attribute evening sales to the next day.
+    s = s.replace("date('now','localtime')", _pg_today())
+    s = s.replace("date('now', 'localtime')", _pg_today())
+    # date(<col>,'localtime') -> that column's date in shop-local time
+    s = re.sub(r"date\(([^,]+),\s*'localtime'\)", lambda m: _pg_local_date(m.group(1)), s)
     # date(?) / date(%s) -> (%s)::date
     s = re.sub(r"date\((%s)\)", r"(\1)::date", s)
     # date(<col>) where col already a date string param -> ::date
     # bare strftime / PRAGMA never reach here (handled in init separately)
     return s
+
+
+def _pg_today():
+    """Today's date in the shop's timezone (not the UTC server's)."""
+    return f"((now() AT TIME ZONE '{SHOP_TZ}')::date)"
+
+
+def _pg_local_date(col):
+    """A timestamptz column rendered as its date in the shop's timezone."""
+    return f"(({col.strip()} AT TIME ZONE '{SHOP_TZ}')::date)"
 
 
 def _pg_now_interval(mod):
@@ -162,6 +178,9 @@ CREATE TABLE IF NOT EXISTS sales (
     discount     REAL NOT NULL DEFAULT 0,
     total        REAL NOT NULL DEFAULT 0,
     voided       INTEGER NOT NULL DEFAULT 0,
+    -- Client-generated key; a retried POST returns the original sale instead
+    -- of creating a duplicate (prevents double-charging on flaky networks).
+    client_ref   TEXT UNIQUE,
     created_at   {ts_type} NOT NULL {ts_default}
 );
 CREATE TABLE IF NOT EXISTS sale_items (
@@ -185,10 +204,59 @@ CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS employees (
+    id         {pk},
+    name       TEXT NOT NULL,
+    pin        TEXT NOT NULL,
+    -- Reserved for a future USB/BT fingerprint reader: the phone's own
+    -- biometric API cannot identify *which* employee, only the device owner.
+    finger_id  TEXT,
+    active     INTEGER NOT NULL DEFAULT 1,
+    created_at {ts_type} NOT NULL {ts_default}
+);
+CREATE TABLE IF NOT EXISTS punches (
+    id          {pk},
+    employee_id INTEGER NOT NULL REFERENCES employees(id),
+    punch_in    {ts_type},
+    punch_out   {ts_type},
+    -- NULL when clean; 'MISSING_OUT' (>14h open) or 'MISSING_IN' (out with no in)
+    flag        TEXT,
+    note        TEXT,
+    created_at  {ts_type} NOT NULL {ts_default}
+);
+CREATE TABLE IF NOT EXISTS punch_audit (
+    id         {pk},
+    punch_id   INTEGER NOT NULL,
+    field      TEXT NOT NULL,
+    old_value  TEXT,
+    new_value  TEXT,
+    changed_by TEXT NOT NULL DEFAULT 'manager',
+    changed_at {ts_type} NOT NULL {ts_default}
+);
+CREATE TABLE IF NOT EXISTS shift_closes (
+    id            {pk},
+    business_date TEXT NOT NULL UNIQUE,
+    paan_cash     REAL NOT NULL DEFAULT 0,
+    tobacco_cash  REAL NOT NULL DEFAULT 0,
+    expected_cash REAL NOT NULL DEFAULT 0,
+    cc_total      REAL NOT NULL DEFAULT 0,
+    shop_total    REAL NOT NULL DEFAULT 0,
+    note          TEXT,
+    created_at    {ts_type} NOT NULL {ts_default}
+);
+CREATE INDEX IF NOT EXISTS idx_punches_emp ON punches(employee_id);
+CREATE INDEX IF NOT EXISTS idx_punches_in ON punches(punch_in);
 CREATE INDEX IF NOT EXISTS idx_sale_items_product ON sale_items(product_id);
 CREATE INDEX IF NOT EXISTS idx_sale_items_sale ON sale_items(sale_id);
 CREATE INDEX IF NOT EXISTS idx_sales_created ON sales(created_at);
 """
+
+
+DEFAULT_SETTINGS = {
+    "employee_discount_pct": "8",   # EMPLOYEE button discount
+    "max_discount_pct": "10",       # cap on the manual discount (% of cart)
+    "punch_max_hours": "14",        # open punch older than this is flagged
+}
 
 
 def init_db():
@@ -201,10 +269,20 @@ def init_db():
             # Deny-all via Supabase's anon-key REST path; the app's password
             # login bypasses RLS so the API is unaffected.
             cur.execute("ALTER TABLE settings ENABLE ROW LEVEL SECURITY")
+            # Migrations for DBs created before these columns existed.
+            cur.execute("ALTER TABLE sales ADD COLUMN IF NOT EXISTS client_ref TEXT")
+            cur.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_client_ref ON sales(client_ref)"
+            )
             cur.execute(
                 "INSERT INTO settings (key, value) VALUES ('stock_pin', %s) ON CONFLICT (key) DO NOTHING",
                 (default_pin,),
             )
+            for k, v in DEFAULT_SETTINGS.items():
+                cur.execute(
+                    "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
+                    (k, v),
+                )
         conn.close()
     else:
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -222,9 +300,13 @@ def init_db():
         ]:
             if col not in scols:
                 conn.execute(ddl)
+        if "client_ref" not in scols:
+            conn.execute("ALTER TABLE sales ADD COLUMN client_ref TEXT")
         conn.execute(
             "INSERT OR IGNORE INTO settings (key, value) VALUES ('stock_pin', ?)",
             (default_pin,),
         )
+        for k, v in DEFAULT_SETTINGS.items():
+            conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
         conn.commit()
         conn.close()

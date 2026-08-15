@@ -27,6 +27,41 @@ def _get_pin(conn):
     return row["value"] if row else os.environ.get("KC_STOCK_PIN", "0000")
 
 
+def _setting(conn, key, default):
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    try:
+        return float(row["value"]) if row else float(default)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _resolve_discount(conn, d, subtotal):
+    """Compute the discount server-side so the client can never over-discount.
+
+    employee_discount=true  -> employee_discount_pct of subtotal (never stacks)
+    otherwise               -> discount / discount_pct, capped at max_discount_pct
+    """
+    if subtotal <= 0:
+        return 0.0
+    if d.get("employee_discount"):
+        pct = _setting(conn, "employee_discount_pct", 8)
+        return round(subtotal * pct / 100.0, 2)
+
+    cap = round(subtotal * _setting(conn, "max_discount_pct", 10) / 100.0, 2)
+    if d.get("discount_pct") is not None:
+        try:
+            pct = max(0.0, float(d.get("discount_pct") or 0))
+        except (TypeError, ValueError):
+            pct = 0.0
+        amount = round(subtotal * pct / 100.0, 2)
+    else:
+        try:
+            amount = max(0.0, float(d.get("discount", 0) or 0))
+        except (TypeError, ValueError):
+            amount = 0.0
+    return round(min(amount, cap, subtotal), 2)
+
+
 def _weekly_demand_map(conn):
     """Units sold per product over the last 28 days, expressed per week."""
     rows = conn.execute(
@@ -259,33 +294,61 @@ def adjust_stock(pid):
 
 @app.post("/api/sales")
 def create_sale():
-    """Record a sale. Body: {payment_type, items:[{product_id, qty}]}.
-    Decrements shop_qty for each item."""
+    """Record a sale. Body: {payment_type, items:[{product_id, qty}],
+    discount, employee_discount, client_ref}.
+
+    Prices always come from the DB, never the client. Stock is guarded so a
+    sale cannot drive shop_qty negative, and client_ref makes a retried POST
+    return the original sale instead of charging twice.
+    """
     d = request.get_json(force=True)
     payment_type = d.get("payment_type", "cash")
     items = d.get("items", [])
-    discount = max(0.0, float(d.get("discount", 0) or 0))
+    client_ref = (d.get("client_ref") or "").strip() or None
     if not items:
         return jsonify({"error": "no items"}), 400
 
     with get_conn() as conn:
+        # Idempotency: this exact sale was already recorded — return it as-is.
+        if client_ref:
+            prev = conn.execute("SELECT * FROM sales WHERE client_ref = ?", (client_ref,)).fetchone()
+            if prev:
+                return jsonify({"id": prev["id"], "subtotal": round(prev["subtotal"], 2),
+                                "discount": round(prev["discount"], 2), "total": round(prev["total"], 2),
+                                "payment_type": prev["payment_type"], "duplicate": True}), 200
+
         subtotal = 0.0
         resolved = []
+        missing, short = [], []
         for it in items:
             row = conn.execute("SELECT * FROM products WHERE id = ?", (it["product_id"],)).fetchone()
             if not row:
+                missing.append(it.get("product_id"))
                 continue
             qty = int(it["qty"])
-            line = row["price"] * qty
-            subtotal += line
+            if qty <= 0:
+                continue
+            if row["shop_qty"] < qty:
+                short.append({"id": row["id"], "name": row["name"],
+                              "requested": qty, "available": row["shop_qty"]})
+                continue
+            subtotal += row["price"] * qty
             resolved.append((row, qty))
 
-        discount = min(discount, subtotal)  # never below zero
-        total = subtotal - discount
+        # Fail loudly instead of silently dropping lines from the sale.
+        if missing:
+            return jsonify({"error": "unknown products", "product_ids": missing}), 400
+        if short:
+            return jsonify({"error": "insufficient stock", "items": short}), 409
+        if not resolved:
+            return jsonify({"error": "no sellable items"}), 400
+
+        discount = _resolve_discount(conn, d, subtotal)
+        total = round(subtotal - discount, 2)
 
         cur = conn.execute(
-            "INSERT INTO sales (payment_type, subtotal, discount, total) VALUES (?,?,?,?)",
-            (payment_type, subtotal, discount, total),
+            "INSERT INTO sales (payment_type, subtotal, discount, total, client_ref) VALUES (?,?,?,?,?)",
+            (payment_type, subtotal, discount, total, client_ref),
         )
         sale_id = cur.lastrowid
 
@@ -485,6 +548,315 @@ def verify_pin():
         # Client caches this to verify the PIN offline when the server is down.
         resp["pin_hash"] = hashlib.sha256(pin.encode()).hexdigest()
     return jsonify(resp)
+
+
+@app.get("/api/settings")
+def get_settings():
+    """Tunables the app reads at startup (employee %, discount cap, punch hours)."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT key, value FROM settings WHERE key <> 'stock_pin'"
+        ).fetchall()
+    return jsonify({r["key"]: r["value"] for r in rows})
+
+
+@app.put("/api/settings")
+def update_settings():
+    """Manager-editable tunables. stock_pin is settable here too (manager UI)."""
+    d = request.get_json(force=True)
+    allowed = {"employee_discount_pct", "max_discount_pct", "punch_max_hours", "stock_pin"}
+    with get_conn() as conn:
+        for k, v in d.items():
+            if k not in allowed:
+                continue
+            row = conn.execute("SELECT 1 FROM settings WHERE key = ?", (k,)).fetchone()
+            if row:
+                conn.execute("UPDATE settings SET value = ? WHERE key = ?", (str(v), k))
+            else:
+                conn.execute("INSERT INTO settings (key, value) VALUES (?,?)", (k, str(v)))
+        rows = conn.execute("SELECT key, value FROM settings WHERE key <> 'stock_pin'").fetchall()
+    return jsonify({r["key"]: r["value"] for r in rows})
+
+
+# --------------------------------------------------------------------------
+# Employees + time clock
+#
+# Identity is a per-employee PIN. The phone's biometric API only proves the
+# DEVICE OWNER authenticated -- it cannot say WHICH employee -- so a real
+# fingerprint reader would populate employees.finger_id and call the same
+# /api/punch endpoint. Nothing else would change.
+# --------------------------------------------------------------------------
+@app.get("/api/employees")
+def list_employees():
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, name, active FROM employees WHERE active = 1 ORDER BY name"
+        ).fetchall()
+        open_rows = conn.execute(
+            "SELECT employee_id FROM punches WHERE punch_out IS NULL"
+        ).fetchall()
+    open_ids = {r["employee_id"] for r in open_rows}
+    return jsonify([
+        {"id": r["id"], "name": r["name"], "on_clock": r["id"] in open_ids} for r in rows
+    ])
+
+
+@app.post("/api/employees")
+def create_employee():
+    d = request.get_json(force=True)
+    name = (d.get("name") or "").strip()
+    pin = str(d.get("pin") or "").strip()
+    if not name or not pin:
+        return jsonify({"error": "name and pin required"}), 400
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO employees (name, pin, finger_id) VALUES (?,?,?)",
+            (name, pin, d.get("finger_id")),
+        )
+        eid = cur.lastrowid
+    return jsonify({"id": eid, "name": name}), 201
+
+
+@app.put("/api/employees/<int:eid>")
+def update_employee(eid):
+    d = request.get_json(force=True)
+    sets, vals = [], []
+    for f in ("name", "pin", "active", "finger_id"):
+        if f in d:
+            sets.append(f"{f} = ?")
+            vals.append(d[f])
+    if not sets:
+        return jsonify({"error": "no fields"}), 400
+    vals.append(eid)
+    with get_conn() as conn:
+        conn.execute(f"UPDATE employees SET {', '.join(sets)} WHERE id = ?", vals)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/punch")
+def punch():
+    """Toggle punch in/out for the employee matching this PIN.
+
+    Rules Parth asked for:
+      - open punch older than punch_max_hours (14) -> flag MISSING_OUT, needs a
+        manager fix; a new punch-in is started so the employee is not blocked.
+      - punch-out with no open punch -> record a flagged MISSING_IN row.
+    """
+    d = request.get_json(force=True)
+    pin = str(d.get("pin") or "").strip()
+    if not pin:
+        return jsonify({"error": "pin required"}), 400
+
+    with get_conn() as conn:
+        emp = conn.execute(
+            "SELECT * FROM employees WHERE pin = ? AND active = 1", (pin,)
+        ).fetchone()
+        if not emp:
+            return jsonify({"error": "unknown pin"}), 404
+
+        max_h = _setting(conn, "punch_max_hours", 14)
+        open_p = conn.execute(
+            "SELECT * FROM punches WHERE employee_id = ? AND punch_out IS NULL ORDER BY punch_in DESC",
+            (emp["id"],),
+        ).fetchone()
+
+        if open_p:
+            hours = conn.execute(
+                "SELECT (julianday('now') - julianday(?)) * 24.0 AS h" if not USE_PG
+                else "SELECT EXTRACT(EPOCH FROM (now() - ?))/3600.0 AS h",
+                (open_p["punch_in"],),
+            ).fetchone()["h"]
+            if hours is not None and float(hours) > max_h:
+                # Forgot to punch out: flag the stale row, start a fresh one.
+                conn.execute(
+                    "UPDATE punches SET flag = 'MISSING_OUT' WHERE id = ?", (open_p["id"],)
+                )
+                conn.execute(
+                    "INSERT INTO punches (employee_id, punch_in) VALUES (?, datetime('now'))",
+                    (emp["id"],),
+                )
+                return jsonify({"action": "in", "employee": emp["name"],
+                                "warning": "previous shift was not closed — manager must fix"}), 201
+            conn.execute(
+                "UPDATE punches SET punch_out = datetime('now') WHERE id = ?", (open_p["id"],)
+            )
+            return jsonify({"action": "out", "employee": emp["name"]}), 200
+
+        conn.execute(
+            "INSERT INTO punches (employee_id, punch_in) VALUES (?, datetime('now'))",
+            (emp["id"],),
+        )
+    return jsonify({"action": "in", "employee": emp["name"]}), 201
+
+
+@app.get("/api/timesheet")
+def timesheet():
+    """?employee_id=&start=YYYY-MM-DD&end=YYYY-MM-DD  (half-month windows)."""
+    eid = request.args.get("employee_id")
+    start = request.args.get("start")
+    end = request.args.get("end")
+    q = ["SELECT p.*, e.name AS employee_name FROM punches p JOIN employees e ON e.id = p.employee_id WHERE 1=1"]
+    vals = []
+    if eid:
+        q.append("AND p.employee_id = ?")
+        vals.append(int(eid))
+    if start:
+        q.append("AND date(p.punch_in) >= date(?)")
+        vals.append(start)
+    if end:
+        q.append("AND date(p.punch_in) <= date(?)")
+        vals.append(end)
+    q.append("ORDER BY p.punch_in DESC")
+    with get_conn() as conn:
+        rows = conn.execute(" ".join(q), vals).fetchall()
+    out = []
+    for r in rows:
+        out.append({
+            "id": r["id"], "employee_id": r["employee_id"], "employee_name": r["employee_name"],
+            "punch_in": str(r["punch_in"]) if r["punch_in"] else None,
+            "punch_out": str(r["punch_out"]) if r["punch_out"] else None,
+            "flag": r["flag"], "note": r["note"],
+        })
+    return jsonify(out)
+
+
+@app.put("/api/punches/<int:pid>")
+def fix_punch(pid):
+    """Manager correction. Every change is written to punch_audit."""
+    d = request.get_json(force=True)
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM punches WHERE id = ?", (pid,)).fetchone()
+        if not row:
+            return jsonify({"error": "not found"}), 404
+        for field in ("punch_in", "punch_out", "flag", "note"):
+            if field not in d:
+                continue
+            old = row[field]
+            new = d[field]
+            if str(old) == str(new):
+                continue
+            conn.execute(f"UPDATE punches SET {field} = ? WHERE id = ?", (new, pid))
+            conn.execute(
+                "INSERT INTO punch_audit (punch_id, field, old_value, new_value, changed_by) VALUES (?,?,?,?,?)",
+                (pid, field, str(old), str(new), d.get("changed_by", "manager")),
+            )
+        # Retention: manager edit log is kept for 3 months.
+        conn.execute("DELETE FROM punch_audit WHERE changed_at < datetime('now','-90 days')")
+    return jsonify({"ok": True})
+
+
+@app.get("/api/punch-audit")
+def punch_audit():
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM punch_audit ORDER BY changed_at DESC LIMIT 200"
+        ).fetchall()
+    return jsonify([{ "id": r["id"], "punch_id": r["punch_id"], "field": r["field"],
+                      "old_value": r["old_value"], "new_value": r["new_value"],
+                      "changed_by": r["changed_by"], "changed_at": str(r["changed_at"]) }
+                    for r in rows])
+
+
+# --------------------------------------------------------------------------
+# Shift close
+# --------------------------------------------------------------------------
+@app.get("/api/shift/summary")
+def shift_summary():
+    """Expected drawer + CC/SHOP breakdown for a business date (default today)."""
+    date = request.args.get("date")
+    with get_conn() as conn:
+        if date:
+            rows = conn.execute(
+                """SELECT payment_type, COALESCE(SUM(total),0) AS total, COUNT(*) AS cnt
+                   FROM sales WHERE voided = 0 AND date(created_at,'localtime') = date(?)
+                   GROUP BY payment_type""", (date,)).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT payment_type, COALESCE(SUM(total),0) AS total, COUNT(*) AS cnt
+                   FROM sales WHERE voided = 0 AND created_at >= date('now','localtime')
+                   GROUP BY payment_type""").fetchall()
+        existing = conn.execute(
+            "SELECT * FROM shift_closes WHERE business_date = date(?)",
+            (date or "now",),
+        ).fetchone() if date else conn.execute(
+            "SELECT * FROM shift_closes WHERE business_date = date('now','localtime')"
+        ).fetchone()
+
+    by_type = {r["payment_type"]: round(r["total"], 2) for r in rows}
+    counts = {r["payment_type"]: r["cnt"] for r in rows}
+    return jsonify({
+        "by_type": by_type,
+        "counts": counts,
+        "expected_cash": round(by_type.get("cash", 0), 2),
+        "cc_total": round(by_type.get("card", 0), 2),
+        "shop_total": round(by_type.get("instore", 0) + by_type.get("shop", 0), 2),
+        "employee_total": round(by_type.get("employee", 0), 2),
+        "sales_total": round(sum(by_type.values()), 2),
+        "closed": bool(existing),
+    })
+
+
+@app.post("/api/shift/close")
+def close_shift():
+    """Manager end-of-day. Punches stay independent so staff can clock out later."""
+    d = request.get_json(force=True)
+    date = d.get("business_date")
+    paan = float(d.get("paan_cash", 0) or 0)
+    tob = float(d.get("tobacco_cash", 0) or 0)
+    with get_conn() as conn:
+        if date:
+            rows = conn.execute(
+                """SELECT payment_type, COALESCE(SUM(total),0) AS total FROM sales
+                   WHERE voided = 0 AND date(created_at,'localtime') = date(?) GROUP BY payment_type""",
+                (date,)).fetchall()
+            bdate = date
+        else:
+            rows = conn.execute(
+                """SELECT payment_type, COALESCE(SUM(total),0) AS total FROM sales
+                   WHERE voided = 0 AND created_at >= date('now','localtime') GROUP BY payment_type""").fetchall()
+            bdate = conn.execute("SELECT date('now','localtime') AS d").fetchone()["d"]
+        by = {r["payment_type"]: r["total"] for r in rows}
+        expected = round(by.get("cash", 0), 2)
+        cc = round(by.get("card", 0), 2)
+        shop = round(by.get("instore", 0) + by.get("shop", 0), 2)
+
+        prev = conn.execute(
+            "SELECT id FROM shift_closes WHERE business_date = ?", (str(bdate),)
+        ).fetchone()
+        if prev:
+            conn.execute(
+                """UPDATE shift_closes SET paan_cash=?, tobacco_cash=?, expected_cash=?,
+                   cc_total=?, shop_total=?, note=? WHERE id = ?""",
+                (paan, tob, expected, cc, shop, d.get("note"), prev["id"]),
+            )
+            sid = prev["id"]
+        else:
+            cur = conn.execute(
+                """INSERT INTO shift_closes (business_date, paan_cash, tobacco_cash,
+                   expected_cash, cc_total, shop_total, note) VALUES (?,?,?,?,?,?,?)""",
+                (str(bdate), paan, tob, expected, cc, shop, d.get("note")),
+            )
+            sid = cur.lastrowid
+    counted = round(paan + tob, 2)
+    return jsonify({"id": sid, "business_date": str(bdate), "expected_cash": expected,
+                    "counted_cash": counted, "over_short": round(counted - expected, 2),
+                    "cc_total": cc, "shop_total": shop}), 201
+
+
+@app.get("/api/shift/closes")
+def list_closes():
+    """Previous days, individually. No all-time sum — that stays owner-only."""
+    limit = int(request.args.get("limit", 30))
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM shift_closes ORDER BY business_date DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return jsonify([{ "id": r["id"], "business_date": str(r["business_date"]),
+                      "paan_cash": r["paan_cash"], "tobacco_cash": r["tobacco_cash"],
+                      "expected_cash": r["expected_cash"], "cc_total": r["cc_total"],
+                      "shop_total": r["shop_total"],
+                      "over_short": round((r["paan_cash"] + r["tobacco_cash"]) - r["expected_cash"], 2),
+                      "note": r["note"] } for r in rows])
 
 
 # Initialise DB on import so gunicorn workers are ready.
