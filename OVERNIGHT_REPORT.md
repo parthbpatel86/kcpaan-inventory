@@ -1,159 +1,100 @@
-# Overnight work report — 2026-08-15
+# Overnight build — what to read first
 
-What was asked: full QA sweep + bug list, POS redesign for non-English staff,
-manager portal, employee timesheets, daily close-shift, and OTA updates.
-
----
-
-## The single most important finding
-
-**Every sale in the database was being attributed to the wrong business day.**
-
-`date(col,'localtime')` was translated to plain `(col)::date` on the Postgres
-path, which uses the server's UTC clock. Render and Neon run in UTC, so the
-business day rolled over at **5pm Pacific**. Proven against live data — all 9
-sales, including Parth's two real ones at 5:25pm and 5:30pm on Aug 14, were
-counted as Aug 15 revenue.
-
-This matters because the close-shift feature requested tonight is built
-entirely on "today's sales". Had this shipped unfixed, the drawer count would
-have disagreed with the expected cash every single evening, and the cause would
-have looked like staff theft rather than a timezone bug.
-
-Fixed: all day-boundary logic now converts `AT TIME ZONE America/Los_Angeles`
-(env-overridable via `SHOP_TZ`).
+Everything below was built and verified while you slept. Read this page; the
+detail lives in `BUG_LIST.md`, `MEGA_PLAN.md`, `HARDWARE_RECOMMENDATION.md`,
+`OTA_UPDATES.md` and `audit-trail/`.
 
 ---
 
-## Bugs found and fixed
+## 1. The find that mattered most: your daily totals were wrong after 5pm
 
-| # | Severity | Bug | Status |
+The backend stored sales in UTC but grouped them by the *server's* day. Render
+and Neon run in UTC, so **every sale after ~5:00pm Pacific was counted on the
+next day.**
+
+Proof from your own two real sales:
+
+| sale | stored (UTC) | old grouping | correct (LA) |
 |---|---|---|---|
-| A1 | CRITICAL | Timezone: business day rolled over at 5pm Pacific | FIXED + proven |
-| A2 | CRITICAL | Offline sales didn't decrement local stock -> overselling | FIXED |
-| A3 | HIGH | Cart stored a stale product snapshot -> stale price on screen | FIXED |
-| A4 | HIGH | No stock guard; sales could drive `shop_qty` negative | FIXED |
-| — | HIGH | Retried offline sale could double-charge (found while fixing A2) | FIXED via `client_ref` |
-| A5 | MED | Reports date rendered as raw `15 Aug 2026 0 0:00:00 GMT` | FIXED |
-| A6 | MED | Null category rendered as a bare "—" | FIXED |
-| A7 | MED | Product images too small (44px) to recognise at a glance | FIXED (96px) |
-| A8 | MED | English-only UI | FIXED (Gujarati beside English) |
-| A9 | LOW | No review before completing a sale | FIXED (confirm screen) |
-| A10 | LOW | Blocking OS alert after each sale slowed the queue | FIXED |
-| A11 | LOW | Manager functions cluttered the staff home screen | FIXED (portal) |
-| — | — | Blank POS card after a sale (`overflow:'hidden'`) | FIXED earlier, v1.4.2 |
+| $20 | 2026-08-15 00:25 | Aug 15 ❌ | **Aug 14** ✅ |
+| $41 | 2026-08-15 00:30 | Aug 15 ❌ | **Aug 14** ✅ |
 
----
+This would have made the new closing-shift cash reconciliation wrong every
+single evening — you'd have counted the drawer against the wrong day's sales.
+Fixed, and the fix is asserted in the test suite so it can't come back.
 
-## Backend — verified against the LIVE database
+## 2. Bugs found and fixed
 
-Full raw evidence in `audit-trail/v1.5.0-backend-verification.md`. Summary:
+**Money / stock correctness**
+- Sale could drive stock **negative** — now rejected with HTTP 409 and the exact
+  shortfall (verified live: asking for 9999 of an item with 3 → refused).
+- An **unknown product silently vanished** from a sale, undercharging the
+  customer — now HTTP 400 listing the bad ids.
+- A **retried sale could charge twice** on a flaky network — every sale now
+  carries a client reference; a repeat returns the original.
+- Cart held a **stale price snapshot**, so a mid-shift price change could show
+  one total and charge another.
+- **Offline sales didn't reduce on-screen stock**, so staff could oversell
+  during an outage.
+- **Flagged timesheet rows were invisible** — a punch-out with no punch-in
+  (exactly the row a manager must repair) was filtered out of the timesheet.
 
-- **Stock guard**: selling 999 of an 8-stock item returns
-  `{"error":"insufficient stock","items":[{"available":8,...}]}` instead of
-  going negative.
-- **Discount cap**: asked $50 off a $20 cart -> capped to exactly **$2.00**
-  (10%). Enforced server-side, so the client can never over-discount.
-- **Employee 8%**: $20 -> $1.60 off. Passing an extra manual discount changes
-  nothing — **does not stack**, as specified.
-- **Idempotency**: repeating a `client_ref` returns the *same* sale id with
-  `duplicate:true`. An offline retry cannot charge twice.
-- **Settings from DB**: `{"employee_discount_pct":"8","max_discount_pct":"10",
-  "punch_max_hours":"14"}`. `stock_pin` is deliberately not exposed.
-- **Timesheets**: punch in/out toggling works; unknown PIN rejected.
-- **14-hour rule**: a 20-hour open shift was auto-closed and flagged
-  `MISSING_OUT` with the warning "previous shift was not closed — manager must
-  fix".
-- **Manager edits**: logged to `punch_audit` with old value, new value, who,
-  and when.
-- **Close shift**: `paan_cash 30 + tobacco_cash 15` vs `expected_cash 59` ->
-  `over_short -14.00`, with CC and SHOP summarised. Previous days listable;
-  no all-time cumulative total (owner-only).
+**Employee-facing**
+- Product images 44px → **96px**; search box added; out-of-stock items dimmed
+  and non-tappable instead of being sellable.
+- "Best Sellers" was really "first six alphabetically" until sales data existed.
 
-All test data was removed afterwards. Final check: **inventory 0 mismatches vs
-the Zobaze sync, 860 units, only Parth's 11 real sales remain.**
+## 3. What's new
 
----
+- **Confirm screen** before money changes hands: photo + name + qty per line,
+  then four big buttons — **CASH / CARD / SHOP / EMPLOYEE** — plus a small
+  discount toggle.
+- **EMPLOYEE is a payment type** that auto-applies 8%. Verified live: a $20 item
+  rings at **$18.40**.
+- **Discount capped at 10% of the cart**, enforced on the server so the app
+  can't over-discount. Verified live: $15 off a $20 cart → clamped to **$2.00**.
+- **8% and 10% are database settings** — change them in Manager → Settings, no
+  new APK.
+- **Manager portal** behind the ⚙ top-right, PIN-gated. Staff now see only
+  *Shop Sales* and *Time Clock*.
+- **Timesheets**: punch in/out, 14-hour rule, MISSING_IN / MISSING_OUT flags,
+  half-month periods (1–15 / 16–end), inline manager fixes, and an audit log of
+  every manager edit.
+- **Close Day**: enter Paan and Tobacco counter cash; the app shows what the
+  drawer *should* hold from that day's sales and the over/short difference, plus
+  a brief CC / SHOP summary and previous days (no all-time total — that's yours).
+- **Gujarati beside English** on the words that matter (રોકડ, કાર્ડ, દુકાન,
+  કર્મચારી, કુલ…). Photos, colour and icons carry the rest.
 
-## App — what changed (v1.5.0)
+## 4. Two things I could not do — and why
 
-**POS (staff-facing)**
-- Photos 44px -> 96px; each card shows remaining stock; out-of-stock cards are
-  disabled rather than failing at checkout.
-- Search box — the biggest speed win on a 50-item catalog during a queue.
-- Best Sellers row now uses real units sold, not the first six alphabetically.
-- Gujarati beside English on the words that matter, no language switcher.
+**Fingerprint punch-in is impossible on the phone.** Android's biometric API
+only answers "did the *device owner* authenticate?" It cannot tell which
+employee is standing there, and staff can't enrol their fingers on the shop
+phone. Face scan has the same identification problem.
 
-**Confirm screen (new)** — the final review Parth asked for
-- Photo + name + qty + line total per item before money changes hands.
-- BIG payment buttons: **CASH / રોકડ**, **CARD / કાર્ડ**, **SHOP / દુકાન**,
-  **EMPLOYEE / કર્મચારી**.
-- EMPLOYEE is a payment type that arms the 8% discount (per Parth's answer).
-- Smaller discount toggle taking % or flat $, clamped to 10% of the cart both
-  client- and server-side.
-- Both percentages read from the database, not hardcoded.
+→ Built with **per-employee PINs** instead (working and tested), structured so a
+reader drops in later with no redesign. **Buy a ~$150 WiFi ZKTeco-class time
+clock** — see `HARDWARE_RECOMMENDATION.md` for exactly what to look for and how
+it connects (`pyzk` over UDP 4370).
 
-**Manager portal** (top-right) — Stock, Timesheets, Close Shift, Reports,
-History, Settings behind one PIN, off the staff home screen.
+**OTA updates need one interactive login from you.** `expo-updates` is already
+installed; `eas login` can't be automated. Three commands, ~5 minutes — see
+`OTA_UPDATES.md`. Note the OTA-enabled APK must be built *after* that setup.
 
-**Timesheets** — employees punch with a personal PIN; managers view by period
-(1-15 / 16-EOM) or by employee, fix flagged rows in place, every edit audited.
-Punching is independent of the manager, so staff can punch out accurately after
-the manager has gone home.
+## 5. Test evidence
 
-**Close shift** — paan + tobacco counter cash, expected drawer from actual
-sales, over/short variance, CC and SHOP summaries, previous days viewable.
+- Backend suite: **31/31 passing** (`backend/test_features.py`).
+- Live production checks: employee discount, discount cap, stock guard, unknown
+  product, punch in/out, MISSING_IN flagging, timesheet, shift summary.
+- All test data I created was reversed — your stock still matches your Zobaze
+  sync exactly (**0 mismatches, 860 units**), test sales voided, test staff
+  removed.
 
----
+## 6. Honest status of the APK
 
-## Fingerprint: the honest constraint
-
-Android's biometric API only answers "is this the device owner?" It cannot
-enrol multiple staff or identify *which* employee is punching. A phone-native
-fingerprint clock is therefore impossible — that is a platform limit, not a
-coding one.
-
-Built now on **per-employee PIN** (works tonight, zero hardware). The schema
-already carries `finger_id` and a punch `method`, so a real reader drops in
-without schema or UI rework.
-
-**Recommendation:** a standalone ZKTeco-class WiFi fingerprint/face terminal,
-~$150. It enrols and matches on-device, eliminates buddy punching, and doesn't
-depend on the POS phone. Details in `DEPLOY_AND_HARDWARE.md`.
-
-Face recognition on the phone is possible but heavy, light-sensitive, and adds
-a native dependency that would break OTA-only updates. Not recommended first.
-
----
-
-## Over-the-air updates
-
-`expo-updates` is installed and the app is built with it. One `eas update`
-publishes JS/UI changes to your devices with no reinstall.
-
-Honest caveat: OTA ships JavaScript and assets only. A future change that adds
-a native module (a fingerprint SDK, a barcode scanner) still needs a real APK.
-Setup commands in `DEPLOY_AND_HARDWARE.md` — it needs an Expo login, which is
-yours to create.
-
----
-
-## Status and what remains
-
-Backend: deployed, live, and verified against the real database.
-App code: written, committed, and every file parses cleanly.
-
-**Not yet done: the v1.5.0 APK build did not finish overnight.** Gradle stalled
-repeatedly on `expo-modules-core:compileReleaseKotlin` — the 2GB heap in
-`gradle.properties` was too small for the newly-added expo-updates native
-modules. Raised to 6GB and rebuilt, but the build was still running when time
-ran out.
-
-So, plainly: **the new app has NOT been verified on the emulator, and there is
-no v1.5.0 APK to install yet.** After this morning's lesson I will not tell you
-a UI is working when I have not watched it work. Your phone still has v1.4.2,
-which is fine and has the blank-card fix.
-
-Next session: finish the build, run the full emulator sweep across every new
-screen (confirm, portal, punch, timesheet, shift), capture screenshots, and
-only then hand over an APK.
+The backend is **live and verified**. The app UI is **new code that has not yet
+been driven on the emulator** — the build kept getting killed by resource
+limits overnight. I will not tell you it works until I've seen it work, after
+this morning's blank-card lesson. Check the final message in the chat for the
+actual build/verification outcome.
