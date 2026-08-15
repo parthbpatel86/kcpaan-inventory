@@ -3,7 +3,7 @@
     "name": "KC Paan POS",
     "slug": "kcpaan-inventory",
     "scheme": "kcpaanpos",
-    "version": "1.4.0",
+    "version": "1.4.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -13,7 +13,7 @@
     },
     "android": {
       "package": "com.kcpaan.pos",
-      "versionCode": 5,
+      "versionCode": 6,
       "adaptiveIcon": {
         "backgroundColor": "#0F7B5A",
         "foregroundImage": "./assets/android-icon-foreground.png",

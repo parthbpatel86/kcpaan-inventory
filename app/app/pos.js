@@ -165,6 +165,7 @@ export default function POS() {
             data={visible}
             keyExtractor={(p) => String(p.id)}
             renderItem={renderCard}
+            extraData={cart.items}
             numColumns={numColumns}
             key={numColumns}
             columnWrapperStyle={{ gap: spacing.md }}
