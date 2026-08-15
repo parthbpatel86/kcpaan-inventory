@@ -64,4 +64,31 @@ export const api = {
   dashboard: () => req('/api/dashboard'),
   verifyPin: (pin) =>
     req('/api/verify-pin', { method: 'POST', body: JSON.stringify({ pin }) }),
+
+  // Settings (employee %, discount cap, punch hours) — DB-driven so Parth can
+  // change them without shipping a new APK.
+  settings: () => req('/api/settings'),
+  updateSettings: (data) =>
+    req('/api/settings', { method: 'PUT', body: JSON.stringify(data) }),
+
+  // Employees + timesheets
+  listEmployees: () => req('/api/employees'),
+  createEmployee: (data) =>
+    req('/api/employees', { method: 'POST', body: JSON.stringify(data) }),
+  updateEmployee: (id, data) =>
+    req(`/api/employees/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  // intent 'out' lets the server record a MISSING_IN row when someone clocks
+  // out but never clocked in, instead of silently starting a new shift.
+  punch: (pin, intent) =>
+    req('/api/punch', { method: 'POST', body: JSON.stringify({ pin, intent }) }),
+  timesheet: (params = '') => req(`/api/timesheet${params}`),
+  updatePunch: (id, data) =>
+    req(`/api/punches/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  punchAudit: (params = '') => req(`/api/punch-audit${params}`),
+
+  // Closing shift
+  shiftSummary: (params = '') => req(`/api/shift/summary${params}`),
+  closeShift: (data) =>
+    req('/api/shift/close', { method: 'POST', body: JSON.stringify(data) }),
+  shiftCloses: (params = '') => req(`/api/shift/closes${params}`),
 };

@@ -11,14 +11,26 @@ Demand color coding: weekly demand = units sold over last 28 days / 4.
 """
 import hashlib
 import os
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-from db import get_conn, init_db, USE_PG
+from db import get_conn, init_db, USE_PG, SHOP_TZ
 import seed as seed_module
 
 app = Flask(__name__)
 CORS(app)
+
+
+def _shop_today():
+    """Today's business date in the shop's timezone, as 'YYYY-MM-DD'.
+
+    The server runs in UTC, so using its date would roll the business day over
+    at 5pm Pacific and file evening sales under tomorrow.
+    """
+    return datetime.now(ZoneInfo(SHOP_TZ)).strftime("%Y-%m-%d")
 
 
 def _get_pin(conn):
@@ -804,11 +816,11 @@ def shift_summary():
                 """SELECT payment_type, COALESCE(SUM(total),0) AS total, COUNT(*) AS cnt
                    FROM sales WHERE voided = 0 AND created_at >= date('now','localtime')
                    GROUP BY payment_type""").fetchall()
+        # business_date is TEXT ('YYYY-MM-DD'); compare it as text. Comparing it
+        # against a SQL date() blows up on Postgres (text = date).
         existing = conn.execute(
-            "SELECT * FROM shift_closes WHERE business_date = date(?)",
-            (date or "now",),
-        ).fetchone() if date else conn.execute(
-            "SELECT * FROM shift_closes WHERE business_date = date('now','localtime')"
+            "SELECT * FROM shift_closes WHERE business_date = ?",
+            (date or _shop_today(),),
         ).fetchone()
 
     by_type = {r["payment_type"]: round(r["total"], 2) for r in rows}
