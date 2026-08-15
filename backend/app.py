@@ -741,21 +741,33 @@ def timesheet():
     if eid:
         q.append("AND p.employee_id = ?")
         vals.append(int(eid))
+    # A MISSING_IN row has punch_in NULL — those are exactly the rows a manager
+    # needs to fix, so fall back to punch_out (and then created_at) for the date
+    # window instead of filtering them out.
     if start:
-        q.append("AND date(p.punch_in) >= date(?)")
+        q.append("AND date(COALESCE(p.punch_in, p.punch_out, p.created_at),'localtime') >= date(?)")
         vals.append(start)
     if end:
-        q.append("AND date(p.punch_in) <= date(?)")
+        q.append("AND date(COALESCE(p.punch_in, p.punch_out, p.created_at),'localtime') <= date(?)")
         vals.append(end)
-    q.append("ORDER BY p.punch_in DESC")
+    q.append("ORDER BY COALESCE(p.punch_in, p.punch_out, p.created_at) DESC")
     with get_conn() as conn:
         rows = conn.execute(" ".join(q), vals).fetchall()
     out = []
     for r in rows:
+        hours = None
+        if r["punch_in"] and r["punch_out"]:
+            try:
+                a = r["punch_in"] if hasattr(r["punch_in"], "timestamp") else datetime.fromisoformat(str(r["punch_in"]))
+                b = r["punch_out"] if hasattr(r["punch_out"], "timestamp") else datetime.fromisoformat(str(r["punch_out"]))
+                hours = round((b - a).total_seconds() / 3600.0, 2)
+            except (TypeError, ValueError):
+                hours = None
         out.append({
             "id": r["id"], "employee_id": r["employee_id"], "employee_name": r["employee_name"],
             "punch_in": str(r["punch_in"]) if r["punch_in"] else None,
             "punch_out": str(r["punch_out"]) if r["punch_out"] else None,
+            "hours": hours,
             "flag": r["flag"], "note": r["note"],
         })
     return jsonify(out)

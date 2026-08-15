@@ -115,8 +115,25 @@ audit = c.get("/api/punch-audit").get_json()
 check("edit written to audit log", len(audit) >= 1, str(audit)[:120])
 
 print("\n== timesheet window ==")
-ts = c.get(f"/api/timesheet?employee_id={eid}&start=2026-08-01&end=2026-08-15").get_json()
+ts = c.get(f"/api/timesheet?employee_id={eid}&start=2026-08-01&end=2026-08-31").get_json()
 check("timesheet returns rows", isinstance(ts, (list, dict)), str(ts)[:120])
+check("timesheet rows carry hours", any("hours" in r for r in ts) if isinstance(ts, list) and ts else True)
+
+print("\n== MISSING_IN rows stay visible in the timesheet ==")
+# Punching out with no open shift leaves punch_in NULL. Those are exactly the
+# rows a manager has to repair, so a date filter must not hide them.
+e2 = c.post("/api/employees", json={"name": "Suresh", "pin": "2222"}).get_json()
+c.post("/api/punch", json={"pin": "2222", "intent": "out"})
+with get_conn() as conn:
+    row = conn.execute(
+        "SELECT id, punch_in, flag FROM punches WHERE employee_id = ?", (e2["id"],)
+    ).fetchone()
+check("MISSING_IN punch recorded with NULL punch_in", row is not None and row["punch_in"] is None, str(row))
+today = __import__("datetime").date.today()
+first = today.replace(day=1).isoformat()
+last = (today.replace(day=28) + __import__("datetime").timedelta(days=4)).replace(day=1).isoformat()
+ts2 = c.get(f"/api/timesheet?employee_id={e2['id']}&start={first}&end={last}").get_json()
+check("flagged row is returned by the timesheet", isinstance(ts2, list) and len(ts2) >= 1, str(ts2)[:200])
 
 print("\n== closing shift ==")
 summ = c.get("/api/shift/summary").get_json()
