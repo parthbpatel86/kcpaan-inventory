@@ -35,6 +35,28 @@ def product_id(name="TestItem", price=10.0, qty=100):
     return r.get_json()["id"]
 
 
+print("\n== SQLite->Postgres translation leaves no 'localtime' behind ==")
+# A missed rewrite is invisible on SQLite and 500s on Postgres in production,
+# so assert the translation directly rather than trusting the SQLite run.
+import importlib  # noqa: E402
+_prev_url = os.environ.get("DATABASE_URL")
+os.environ["DATABASE_URL"] = "postgresql://translation-check"
+import db as _db  # noqa: E402
+importlib.reload(_db)
+for _sql in [
+    "date(COALESCE(p.punch_in, p.punch_out, p.created_at),'localtime') >= date(?)",
+    "date(created_at,'localtime') = date(?)",
+    "SELECT date(s.created_at,'localtime') AS day FROM sales",
+    "created_at >= date('now','localtime')",
+]:
+    _out = _db._to_pg_sql(_sql)
+    check(f"translated: {_sql[:44]}…", "'localtime'" not in _out, _out[:110])
+if _prev_url is None:
+    os.environ.pop("DATABASE_URL", None)
+else:
+    os.environ["DATABASE_URL"] = _prev_url
+importlib.reload(_db)
+
 print("\n== settings are DB-driven ==")
 s = c.get("/api/settings").get_json()
 check("employee_discount_pct default 8", s.get("employee_discount_pct") == "8")

@@ -39,8 +39,11 @@ def _to_pg_sql(sql):
     # day over at 5pm Pacific and mis-attribute evening sales to the next day.
     s = s.replace("date('now','localtime')", _pg_today())
     s = s.replace("date('now', 'localtime')", _pg_today())
-    # date(<col>,'localtime') -> that column's date in shop-local time
-    s = re.sub(r"date\(([^,]+),\s*'localtime'\)", lambda m: _pg_local_date(m.group(1)), s)
+    # date(<expr>,'localtime') -> that expression's date in shop-local time.
+    # <expr> may itself contain commas and nested parens, e.g.
+    # date(COALESCE(a, b, c),'localtime'), so match parens by depth rather than
+    # with a naive [^,]+ (which left such calls untranslated and 500'd on PG).
+    s = _sub_local_date(s)
     # date(?) / date(%s) -> (%s)::date
     s = re.sub(r"date\((%s)\)", r"(\1)::date", s)
     # date(<col>) where col already a date string param -> ::date
@@ -56,6 +59,45 @@ def _pg_today():
 def _pg_local_date(col):
     """A timestamptz column rendered as its date in the shop's timezone."""
     return f"(({col.strip()} AT TIME ZONE '{SHOP_TZ}')::date)"
+
+
+def _sub_local_date(s):
+    """Rewrite every date(<expr>,'localtime') using paren-depth matching.
+
+    <expr> can contain commas and nested calls (COALESCE(a, b, c)), which a
+    plain regex cannot handle — and a missed rewrite leaves a SQLite-only
+    date(x, 'localtime') that Postgres rejects at runtime.
+    """
+    needle = "date("
+    out = []
+    i = 0
+    while True:
+        j = s.find(needle, i)
+        if j == -1:
+            out.append(s[i:])
+            return "".join(out)
+        # Walk to the matching close paren, tracking depth.
+        k = j + len(needle)
+        depth = 1
+        while k < len(s) and depth:
+            if s[k] == "(":
+                depth += 1
+            elif s[k] == ")":
+                depth -= 1
+            k += 1
+        if depth:  # unbalanced — leave the rest untouched
+            out.append(s[i:])
+            return "".join(out)
+        inner = s[j + len(needle):k - 1]
+        marker = ",'localtime'"
+        stripped = inner.replace(", 'localtime'", marker)
+        if stripped.endswith(marker):
+            expr = stripped[: -len(marker)]
+            out.append(s[i:j])
+            out.append(_pg_local_date(expr))
+        else:
+            out.append(s[i:k])
+        i = k
 
 
 def _pg_now_interval(mod):
