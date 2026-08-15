@@ -14,7 +14,7 @@ import os
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-from db import get_conn, init_db
+from db import get_conn, init_db, USE_PG
 import seed as seed_module
 
 app = Flask(__name__)
@@ -35,15 +35,38 @@ def _setting(conn, key, default):
         return float(default)
 
 
+def _open_hours(conn, punch_in):
+    """Hours a punch has been open. Postgres returns datetimes, SQLite strings."""
+    if punch_in is None:
+        return None
+    row = conn.execute(
+        "SELECT EXTRACT(EPOCH FROM (now() - ?))/3600.0 AS h" if USE_PG
+        else "SELECT (julianday('now') - julianday(?)) * 24.0 AS h",
+        (punch_in,),
+    ).fetchone()
+    try:
+        return float(row["h"]) if row and row["h"] is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _resolve_discount(conn, d, subtotal):
     """Compute the discount server-side so the client can never over-discount.
 
-    employee_discount=true  -> employee_discount_pct of subtotal (never stacks)
+    payment_type 'employee' -> employee_discount_pct of subtotal (never stacks)
     otherwise               -> discount / discount_pct, capped at max_discount_pct
+
+    The employee rate is driven by the payment type itself, not by a client
+    flag: EMPLOYEE is a payment button, so staff can never be charged full
+    price because the client forgot to send the flag.
     """
     if subtotal <= 0:
         return 0.0
-    if d.get("employee_discount"):
+    is_employee = (
+        str(d.get("payment_type") or "").lower() == "employee"
+        or bool(d.get("employee_discount"))
+    )
+    if is_employee:
         pct = _setting(conn, "employee_discount_pct", 8)
         return round(subtotal * pct / 100.0, 2)
 
@@ -661,12 +684,8 @@ def punch():
         ).fetchone()
 
         if open_p:
-            hours = conn.execute(
-                "SELECT (julianday('now') - julianday(?)) * 24.0 AS h" if not USE_PG
-                else "SELECT EXTRACT(EPOCH FROM (now() - ?))/3600.0 AS h",
-                (open_p["punch_in"],),
-            ).fetchone()["h"]
-            if hours is not None and float(hours) > max_h:
+            hours = _open_hours(conn, open_p["punch_in"])
+            if hours is not None and hours > max_h:
                 # Forgot to punch out: flag the stale row, start a fresh one.
                 conn.execute(
                     "UPDATE punches SET flag = 'MISSING_OUT' WHERE id = ?", (open_p["id"],)
@@ -681,6 +700,16 @@ def punch():
                 "UPDATE punches SET punch_out = datetime('now') WHERE id = ?", (open_p["id"],)
             )
             return jsonify({"action": "out", "employee": emp["name"]}), 200
+
+        # No open punch. If the employee explicitly meant to clock OUT, they
+        # forgot to clock in — record it flagged so a manager fixes the time.
+        if d.get("intent") == "out":
+            conn.execute(
+                "INSERT INTO punches (employee_id, punch_out, flag) VALUES (?, datetime('now'), 'MISSING_IN')",
+                (emp["id"],),
+            )
+            return jsonify({"action": "out", "employee": emp["name"], "flag": "MISSING_IN",
+                            "warning": "no punch-in found — manager must set the start time"}), 201
 
         conn.execute(
             "INSERT INTO punches (employee_id, punch_in) VALUES (?, datetime('now'))",
