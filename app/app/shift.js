@@ -141,7 +141,7 @@ export default function CloseShift() {
               style={styles.noteInput}
               value={note}
               onChangeText={setNote}
-              placeholder="e.g. ₹200 taken for change"
+              placeholder="e.g. $20 taken for change"
               placeholderTextColor={colors.textLight}
             />
 
@@ -204,7 +204,8 @@ function num(v) {
 }
 
 function money(v) {
-  return `₹${num(v).toFixed(2)}`;
+  // The shop is in Cerritos, CA — dollars, matching every other screen.
+  return `$${num(v).toFixed(2)}`;
 }
 
 const styles = StyleSheet.create({

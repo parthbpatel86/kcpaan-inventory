@@ -11,18 +11,13 @@ export default function RootLayout() {
         <StatusBar style="light" backgroundColor={colors.primaryDark} />
         <Stack
           screenOptions={{
-            headerStyle: { backgroundColor: colors.primary },
-            headerTintColor: colors.white,
-            headerTitleStyle: { fontWeight: '700' },
+            // Every screen draws its own coloured header bar, so the router's
+            // header stays off — otherwise each screen shows two stacked
+            // headers (e.g. a plain "confirm" bar above "Review order").
+            headerShown: false,
             contentStyle: { backgroundColor: colors.bg },
           }}
-        >
-          <Stack.Screen name="index" options={{ headerShown: false }} />
-          <Stack.Screen name="pos" options={{ headerShown: false }} />
-          <Stack.Screen name="stock" options={{ headerShown: false }} />
-          <Stack.Screen name="history" options={{ headerShown: false }} />
-          <Stack.Screen name="reports" options={{ headerShown: false }} />
-        </Stack>
+        />
       </CartProvider>
     </SafeAreaProvider>
   );
