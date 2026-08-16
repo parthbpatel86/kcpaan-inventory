@@ -67,9 +67,35 @@ export default function Stock() {
     }
   }
 
+  /** Adjust one location by +1/-1 straight from the list.
+   *
+   *  The number on screen updates immediately so counting stock feels like
+   *  counting, not like waiting for a server. If the write fails we put the old
+   *  value back and say why — never leave a wrong number sitting there.
+   */
+  async function bump(product, location, delta) {
+    const key = location === 'shop' ? 'shop_qty' : 'warehouse_qty';
+    if (product[key] + delta < 0) return;          // never go negative
+    setProducts((prev) =>
+      prev.map((p) => (p.id === product.id ? { ...p, [key]: p[key] + delta } : p)),
+    );
+    try {
+      await api.adjustStock(product.id, {
+        kind: delta > 0 ? 'add' : 'remove',
+        location,
+        delta,
+        note: 'stock list',
+      });
+    } catch (e) {
+      setProducts((prev) =>
+        prev.map((p) => (p.id === product.id ? { ...p, [key]: p[key] - delta } : p)),
+      );
+      Alert.alert('Could not update stock', String(e.message || e));
+    }
+  }
+
   function renderRow({ item }) {
     const health = HEALTH[item.health] || HEALTH.healthy;
-    const needsStock = item.health === 'order' || item.health === 'low';
     return (
       <View style={styles.rowWrap}>
         <Pressable style={styles.row} onPress={() => setEditProduct(item)}>
@@ -77,30 +103,27 @@ export default function Stock() {
           <View style={{ marginLeft: 4 }}><ProductImage product={item} size={40} /></View>
           <View style={{ flex: 1 }}>
             <Text style={styles.rowName}>{item.name}</Text>
-            <Text style={styles.rowCat}>{item.category || '—'} · ${item.price.toFixed(2)}</Text>
-          </View>
-          <View style={styles.rowStocks}>
-            <View style={styles.stockChip}>
-              <Text style={styles.stockChipLabel}>Shop</Text>
-              <Text style={styles.stockChipVal}>{item.shop_qty}</Text>
-            </View>
-            <View style={[styles.stockChip, styles.stockChipWh]}>
-              <Text style={styles.stockChipLabel}>WH</Text>
-              <Text style={styles.stockChipVal}>{item.warehouse_qty}</Text>
-            </View>
+            <Text style={styles.rowCat}>
+              {item.category ? `${item.category} · ` : ''}${item.price.toFixed(2)}
+            </Text>
           </View>
         </Pressable>
-        {/* One-tap restock buttons appear only for low/order items */}
-        {needsStock && (
-          <View style={styles.quickRow}>
-            <Text style={styles.quickHint}>Restock to shop:</Text>
-            {[10, 25, 50].map((n) => (
-              <Pressable key={n} style={styles.quickBtn} onPress={() => quickRestock(item, n)}>
-                <Text style={styles.quickBtnTxt}>+{n}</Text>
-              </Pressable>
-            ))}
-          </View>
-        )}
+
+        {/* Shop and WH are editable right here — Parth: "I can edit stock +-
+            in shop and wh from the main screen of stocks". No drilling in. */}
+        <View style={styles.counterRow}>
+          <StockCounter
+            label="Shop"
+            value={item.shop_qty}
+            onChange={(d) => bump(item, 'shop', d)}
+          />
+          <StockCounter
+            label="WH"
+            value={item.warehouse_qty}
+            onChange={(d) => bump(item, 'warehouse', d)}
+            muted
+          />
+        </View>
       </View>
     );
   }
@@ -363,7 +386,43 @@ function AdjustRow({ label, value, onChange, onApply }) {
   );
 }
 
+/** Label + [−] value [+] — the whole point is no extra screens or taps. */
+function StockCounter({ label, value, onChange, muted }) {
+  return (
+    <View style={[styles.counter, muted && styles.counterMuted]}>
+      <Text style={styles.counterLabel}>{label}</Text>
+      <Pressable
+        style={[styles.counterBtn, value <= 0 && styles.counterBtnOff]}
+        onPress={() => onChange(-1)}
+        disabled={value <= 0}
+        hitSlop={8}
+      >
+        <Text style={styles.counterBtnTxt}>−</Text>
+      </Pressable>
+      <Text style={styles.counterVal}>{value}</Text>
+      <Pressable style={styles.counterBtn} onPress={() => onChange(1)} hitSlop={8}>
+        <Text style={styles.counterBtnTxt}>+</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  counterRow: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.md },
+  counter: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: colors.primaryLight, borderRadius: radius.md,
+    paddingHorizontal: spacing.sm, paddingVertical: 6,
+  },
+  counterMuted: { backgroundColor: colors.surfaceAlt },
+  counterLabel: { fontSize: 12, fontWeight: '800', color: colors.textMuted, width: 34 },
+  counterBtn: {
+    width: 38, height: 38, borderRadius: 19, backgroundColor: colors.primary,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  counterBtnOff: { backgroundColor: colors.border },
+  counterBtnTxt: { color: colors.white, fontSize: 22, fontWeight: '900', lineHeight: 24 },
+  counterVal: { fontSize: 20, fontWeight: '900', color: colors.text, minWidth: 40, textAlign: 'center' },
   safe: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md, backgroundColor: colors.bg },
   muted: { color: colors.textMuted, fontSize: 14 },
