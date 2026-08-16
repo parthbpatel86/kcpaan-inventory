@@ -156,6 +156,39 @@ with get_conn() as conn:
     ).fetchone()["method"]
 check("PIN punches still record method='pin'", m2 in ("face", "pin"), f"method={m2}")
 
+print("\n== duplicate PINs are refused (payroll integrity) ==")
+# Two people sharing a PIN meant a punch clocked in whichever row the database
+# returned first — silently wrong hours for both.
+dup = c.post("/api/employees", json={"name": "Copycat", "pin": "1111"})
+check("creating a second employee with the same PIN is rejected", dup.status_code == 409, str(dup.get_json()))
+check("rejection names the existing holder", (dup.get_json() or {}).get("used_by") == "Ramesh", str(dup.get_json()))
+
+e3 = c.post("/api/employees", json={"name": "Kiran", "pin": "3333"}).get_json()
+upd = c.put(f"/api/employees/{e3['id']}", json={"pin": "1111"})
+check("changing a PIN onto a taken one is rejected", upd.status_code == 409, str(upd.get_json()))
+
+print("\n== name + PIN identifies the right person ==")
+with get_conn() as conn:
+    conn.execute("UPDATE punches SET punch_out = datetime('now') WHERE punch_out IS NULL")
+r = c.post("/api/punch", json={"employee_id": e3["id"], "pin": "3333"})
+check("punch with matching name+pin works", r.get_json().get("employee") == "Kiran", str(r.get_json()))
+r = c.post("/api/punch", json={"employee_id": e3["id"], "pin": "9999"})
+check("punch with wrong pin for that name is refused", r.status_code == 404, str(r.get_json()))
+
+print("\n== close shift: only TOBACCO reconciles against expected ==")
+# The paan counter is a separate cash business that this app does not ring up.
+# Adding it to the drawer comparison made every day look massively over.
+r = c.post("/api/shift/close", json={"paan_cash": 500.0, "tobacco_cash": 61.0})
+j = r.get_json()
+check("counted_cash is tobacco only", abs(j.get("counted_cash", 0) - 61.0) < 0.01, str(j))
+check("paan is recorded separately", abs(j.get("paan_cash", 0) - 500.0) < 0.01, str(j))
+check("over_short ignores paan", abs(j.get("over_short", 999) - (61.0 - j.get("expected_cash", 0))) < 0.01, str(j))
+
+print("\n== shift summary shows who worked ==")
+summ = c.get("/api/shift/summary").get_json()
+check("summary includes staff_today", "staff_today" in summ, str(summ)[:200])
+check("summary includes staff_hours_total", "staff_hours_total" in summ, str(summ)[:200])
+
 print("\n== manager edit is audited ==")
 with get_conn() as conn:
     row = conn.execute(

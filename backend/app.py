@@ -645,6 +645,17 @@ def create_employee():
     if not name or not pin:
         return jsonify({"error": "name and pin required"}), 400
     with get_conn() as conn:
+        # PINs must be unique among active staff. If two people shared one, a
+        # punch would clock in whichever row the query happened to return
+        # first — silently wrong hours for both.
+        clash = conn.execute(
+            "SELECT name FROM employees WHERE pin = ? AND active = 1", (pin,)
+        ).fetchone()
+        if clash:
+            return jsonify({
+                "error": "pin already used",
+                "used_by": clash["name"],
+            }), 409
         cur = conn.execute(
             "INSERT INTO employees (name, pin, finger_id) VALUES (?,?,?)",
             (name, pin, d.get("finger_id")),
@@ -665,6 +676,15 @@ def update_employee(eid):
         return jsonify({"error": "no fields"}), 400
     vals.append(eid)
     with get_conn() as conn:
+        # Same uniqueness rule as creation — changing a PIN must not collide
+        # with another active member of staff.
+        if "pin" in d:
+            clash = conn.execute(
+                "SELECT name FROM employees WHERE pin = ? AND active = 1 AND id <> ?",
+                (str(d["pin"]).strip(), eid),
+            ).fetchone()
+            if clash:
+                return jsonify({"error": "pin already used", "used_by": clash["name"]}), 409
         conn.execute(f"UPDATE employees SET {', '.join(sets)} WHERE id = ?", vals)
     return jsonify({"ok": True})
 
@@ -716,10 +736,26 @@ def punch():
             emp = conn.execute(
                 "SELECT * FROM employees WHERE id = ? AND active = 1", (int(emp_id),)
             ).fetchone()
-        else:
+        elif emp_id and pin:
+            # Staff pick their name, THEN type their PIN. Identity comes from
+            # the selected row, so the punch is unambiguous even if two people
+            # were ever given the same PIN.
             emp = conn.execute(
-                "SELECT * FROM employees WHERE pin = ? AND active = 1", (pin,)
+                "SELECT * FROM employees WHERE id = ? AND pin = ? AND active = 1",
+                (int(emp_id), pin),
             ).fetchone()
+        else:
+            # PIN only (legacy path). Refuse when the PIN is ambiguous rather
+            # than clocking in whichever row the database happened to return.
+            matches = conn.execute(
+                "SELECT * FROM employees WHERE pin = ? AND active = 1", (pin,)
+            ).fetchall()
+            if len(matches) > 1:
+                return jsonify({
+                    "error": "ambiguous pin",
+                    "message": "More than one person uses this PIN — pick your name first.",
+                }), 409
+            emp = matches[0] if matches else None
         if not emp:
             return jsonify({"error": "unknown pin"}), 404
 
@@ -869,6 +905,37 @@ def shift_summary():
             (date or _shop_today(),),
         ).fetchone()
 
+        # Who was on the clock that day — the manager wants to see this next to
+        # the drawer count when closing up.
+        bdate = date or _shop_today()
+        worked = conn.execute(
+            """SELECT e.name AS name, p.punch_in AS punch_in, p.punch_out AS punch_out,
+                      p.flag AS flag
+               FROM punches p JOIN employees e ON e.id = p.employee_id
+               WHERE date(COALESCE(p.punch_in, p.punch_out),'localtime') = date(?)
+               ORDER BY p.punch_in""",
+            (bdate,),
+        ).fetchall()
+
+    staff = []
+    for w in worked:
+        hours = None
+        if w["punch_in"] and w["punch_out"]:
+            try:
+                a = w["punch_in"] if hasattr(w["punch_in"], "timestamp") else datetime.fromisoformat(str(w["punch_in"]))
+                b = w["punch_out"] if hasattr(w["punch_out"], "timestamp") else datetime.fromisoformat(str(w["punch_out"]))
+                hours = round((b - a).total_seconds() / 3600.0, 2)
+            except (TypeError, ValueError):
+                hours = None
+        staff.append({
+            "name": w["name"],
+            "punch_in": str(w["punch_in"]) if w["punch_in"] else None,
+            "punch_out": str(w["punch_out"]) if w["punch_out"] else None,
+            "hours": hours,
+            "flag": w["flag"],
+            "on_clock": bool(w["punch_in"] and not w["punch_out"]),
+        })
+
     by_type = {r["payment_type"]: round(r["total"], 2) for r in rows}
     counts = {r["payment_type"]: r["cnt"] for r in rows}
     return jsonify({
@@ -880,6 +947,8 @@ def shift_summary():
         "employee_total": round(by_type.get("employee", 0), 2),
         "sales_total": round(sum(by_type.values()), 2),
         "closed": bool(existing),
+        "staff_today": staff,
+        "staff_hours_total": round(sum(s["hours"] or 0 for s in staff), 2),
     })
 
 
@@ -924,9 +993,15 @@ def close_shift():
                 (str(bdate), paan, tob, expected, cc, shop, d.get("note")),
             )
             sid = cur.lastrowid
-    counted = round(paan + tob, 2)
+    # Only the TOBACCO counter is rung up through this app, so only that number
+    # reconciles against expected cash. The paan counter is a separate cash
+    # business — it is recorded for the day's books but must NOT be added to
+    # the drawer comparison, or every day would look massively over.
     return jsonify({"id": sid, "business_date": str(bdate), "expected_cash": expected,
-                    "counted_cash": counted, "over_short": round(counted - expected, 2),
+                    "tobacco_cash": round(tob, 2), "paan_cash": round(paan, 2),
+                    "counted_cash": round(tob, 2),
+                    "over_short": round(tob - expected, 2),
+                    "combined_cash": round(paan + tob, 2),
                     "cc_total": cc, "shop_total": shop}), 201
 
 
@@ -942,7 +1017,9 @@ def list_closes():
                       "paan_cash": r["paan_cash"], "tobacco_cash": r["tobacco_cash"],
                       "expected_cash": r["expected_cash"], "cc_total": r["cc_total"],
                       "shop_total": r["shop_total"],
-                      "over_short": round((r["paan_cash"] + r["tobacco_cash"]) - r["expected_cash"], 2),
+                      # Tobacco alone reconciles against expected — the paan
+                      # counter is a separate cash business, not rung up here.
+                      "over_short": round(r["tobacco_cash"] - r["expected_cash"], 2),
                       "note": r["note"] } for r in rows])
 
 
