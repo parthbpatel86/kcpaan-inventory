@@ -20,6 +20,11 @@ export const L = {
   punchIn: { en: 'IN', gu: 'અંદર' },
   punchOut: { en: 'OUT', gu: 'બહાર' },
   manager: { en: 'Manager', gu: 'મેનેજર' },
+  scanFace: { en: 'Scan face', gu: 'ચહેરો સ્કેન' },
+  usePin: { en: 'Use PIN', gu: 'પિન વાપરો' },
+  lookAtCamera: { en: 'Look at the camera', gu: 'કેમેરા સામે જુઓ' },
+  notYou: { en: 'Not you?', gu: 'તમે નથી?' },
+  tryAgain: { en: 'Try again', gu: 'ફરી પ્રયત્ન' },
 };
 
 // "CASH / રોકડ" — one string, used where space allows.

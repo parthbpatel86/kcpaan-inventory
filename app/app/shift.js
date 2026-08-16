@@ -10,6 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { colors, radius, spacing, shadow } from '../src/lib/theme';
 import { api } from '../src/lib/api';
+import KeyboardScreen from '../src/components/KeyboardScreen';
 
 export default function CloseShift() {
   const router = useRouter();
@@ -37,7 +38,10 @@ export default function CloseShift() {
   const expected = num(summary && summary.expected_cash);
   const paanCash = num(paan);
   const tobaccoCash = num(tobacco);
-  const counted = paanCash + tobaccoCash;
+  // Only the tobacco counter is rung up through this app, so only that number
+  // reconciles against expected cash. The paan counter is a separate cash
+  // business — recorded for the books, never added to the drawer comparison.
+  const counted = tobaccoCash;
   const overShort = counted - expected;
   const balanced = overShort === 0;
   const osColor = overShort < 0 ? colors.danger : colors.healthy;
@@ -77,7 +81,7 @@ export default function CloseShift() {
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xl * 2 }}>
+      <KeyboardScreen>
         {loading ? (
           <ActivityIndicator color={colors.primary} />
         ) : (
@@ -94,18 +98,8 @@ export default function CloseShift() {
 
             <Text style={styles.sectionTitle}>Count the drawers</Text>
 
-            <Text style={styles.fieldLabel}>Paan counter total</Text>
-            <TextInput
-              style={styles.moneyInput}
-              value={paan}
-              onChangeText={setPaan}
-              keyboardType="decimal-pad"
-              placeholder="0"
-              placeholderTextColor={colors.textLight}
-              textAlign="center"
-            />
-
             <Text style={styles.fieldLabel}>Tobacco counter total</Text>
+            <Text style={styles.fieldHint}>Rung up in this app — this is what must match.</Text>
             <TextInput
               style={styles.moneyInput}
               value={tobacco}
@@ -116,9 +110,21 @@ export default function CloseShift() {
               textAlign="center"
             />
 
+            <Text style={styles.fieldLabel}>Paan counter total</Text>
+            <Text style={styles.fieldHint}>Recorded for the books only — not compared to expected.</Text>
+            <TextInput
+              style={styles.moneyInput}
+              value={paan}
+              onChangeText={setPaan}
+              keyboardType="decimal-pad"
+              placeholder="0"
+              placeholderTextColor={colors.textLight}
+              textAlign="center"
+            />
+
             <View style={styles.mathCard}>
               <View style={styles.mathRow}>
-                <Text style={styles.mathLabel}>Counted</Text>
+                <Text style={styles.mathLabel}>Tobacco counted</Text>
                 <Text style={styles.mathValue}>{money(counted)}</Text>
               </View>
               <View style={styles.mathRow}>
@@ -164,7 +170,38 @@ export default function CloseShift() {
                 <Text style={styles.miniLabel}>Shop</Text>
                 <Text style={styles.miniValue}>{money(num(summary && summary.shop_total))}</Text>
               </View>
+              <View style={styles.miniCard}>
+                <Text style={styles.miniLabel}>Paan</Text>
+                <Text style={styles.miniValue}>{money(paanCash)}</Text>
+              </View>
             </View>
+
+            {/* Who was on the clock — the manager wants this beside the drawer
+                count, so the day's hours and the day's cash are seen together. */}
+            <Text style={styles.sectionTitle}>Who worked today</Text>
+            {(summary && summary.staff_today && summary.staff_today.length > 0) ? (
+              <>
+                {summary.staff_today.map((s, i) => (
+                  <View key={`${s.name}-${i}`} style={styles.staffRow}>
+                    <Text style={styles.staffRowName}>{s.name}</Text>
+                    <Text style={styles.staffRowTimes}>
+                      {clockTime(s.punch_in)} → {s.on_clock ? 'still in' : clockTime(s.punch_out)}
+                    </Text>
+                    <Text style={styles.staffRowHours}>
+                      {s.hours != null ? `${s.hours.toFixed(2)}h` : '—'}
+                    </Text>
+                  </View>
+                ))}
+                <View style={styles.staffTotalRow}>
+                  <Text style={styles.staffTotalLabel}>Total hours</Text>
+                  <Text style={styles.staffTotalValue}>
+                    {num(summary.staff_hours_total).toFixed(2)}h
+                  </Text>
+                </View>
+              </>
+            ) : (
+              <Text style={styles.muted}>Nobody clocked in today.</Text>
+            )}
 
             {/* Previous days are listed one row per day ON PURPOSE. We deliberately
                 do NOT render any all-time / grand total across days — the owner
@@ -193,7 +230,7 @@ export default function CloseShift() {
             )}
           </>
         )}
-      </ScrollView>
+      </KeyboardScreen>
     </SafeAreaView>
   );
 }
@@ -208,12 +245,35 @@ function money(v) {
   return `$${num(v).toFixed(2)}`;
 }
 
+/** "9:05 AM" — no seconds; nobody counting a drawer cares about seconds. */
+function clockTime(v) {
+  if (!v) return '—';
+  const d = new Date(String(v).replace(' ', 'T'));
+  if (isNaN(d.getTime())) return String(v).slice(11, 16) || '—';
+  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: colors.primary, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   back: { color: colors.white, fontSize: 30, fontWeight: '700' },
   headerTitle: { color: colors.white, fontSize: 20, fontWeight: '800' },
   muted: { color: colors.textMuted, fontSize: 14 },
+  fieldHint: { fontSize: 12, color: colors.textMuted, marginTop: 2, marginBottom: 4 },
+  staffRow: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface,
+    borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    marginBottom: spacing.sm, ...shadow.card,
+  },
+  staffRowName: { flex: 1, fontSize: 16, fontWeight: '800', color: colors.text },
+  staffRowTimes: { fontSize: 13, color: colors.textMuted, marginRight: spacing.md },
+  staffRowHours: { fontSize: 16, fontWeight: '800', color: colors.primary, minWidth: 58, textAlign: 'right' },
+  staffTotalRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+  },
+  staffTotalLabel: { fontSize: 14, fontWeight: '700', color: colors.textMuted },
+  staffTotalValue: { fontSize: 18, fontWeight: '900', color: colors.text },
 
   sectionTitle: { fontSize: 15, fontWeight: '800', color: colors.textMuted, marginTop: spacing.xl, marginBottom: spacing.sm },
   fieldLabel: { fontSize: 15, fontWeight: '800', color: colors.text, marginTop: spacing.md, marginBottom: spacing.xs },

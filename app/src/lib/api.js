@@ -79,8 +79,23 @@ export const api = {
     req(`/api/employees/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   // intent 'out' lets the server record a MISSING_IN row when someone clocks
   // out but never clocked in, instead of silently starting a new shift.
-  punch: (pin, intent) =>
-    req('/api/punch', { method: 'POST', body: JSON.stringify({ pin, intent }) }),
+  // employeeId identifies WHO is punching; the PIN then proves it is them.
+  // Sending both means a shared PIN can never clock in the wrong person.
+  punch: (pin, intent, employeeId) =>
+    req('/api/punch', {
+      method: 'POST',
+      body: JSON.stringify({ pin, intent, employee_id: employeeId }),
+    }),
+  // Face embeddings for every enrolled employee, for matching ON THE DEVICE.
+  // Vectors only — no photograph ever leaves the phone.
+  employeeFaces: () => req('/api/employees/faces'),
+  // Punch after an on-device face match. The server records method='face' only
+  // when employee_id is sent WITHOUT a pin, so pin is deliberately omitted.
+  punchByFace: (employeeId, intent) =>
+    req('/api/punch', {
+      method: 'POST',
+      body: JSON.stringify({ employee_id: employeeId, intent }),
+    }),
   timesheet: (params = '') => req(`/api/timesheet${params}`),
   updatePunch: (id, data) =>
     req(`/api/punches/${id}`, { method: 'PUT', body: JSON.stringify(data) }),

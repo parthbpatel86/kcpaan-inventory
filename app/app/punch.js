@@ -29,10 +29,12 @@ export default function Punch() {
   useEffect(() => { load(); }, []);
 
   async function doPunch(intent) {
-    if (!pin.trim() || busy) return;
+    // Identity comes from the SELECTED person, not from the PIN alone. If two
+    // people ever shared a PIN, a PIN-only punch could clock in the wrong one.
+    if (!selected || !pin.trim() || busy) return;
     setBusy(true);
     try {
-      const res = await api.punch(pin.trim(), intent);
+      const res = await api.punch(pin.trim(), intent, selected.id);
       const verb = res.action === 'in' ? 'Punched IN' : 'Punched OUT';
       Alert.alert(`${verb} — ${res.employee}`, res.warning ? `⚠️ ${res.warning}` : timeNow());
       setPin('');
@@ -40,7 +42,10 @@ export default function Punch() {
       load();
     } catch (e) {
       const msg = String(e.message || e);
-      Alert.alert('Not recognised', /404/.test(msg) ? 'That PIN is not registered.' : msg);
+      Alert.alert(
+        'Not recognised',
+        /404/.test(msg) ? `That PIN is not correct for ${selected.name}.` : msg,
+      );
     } finally {
       setBusy(false);
     }
@@ -59,22 +64,45 @@ export default function Punch() {
           <ActivityIndicator color={colors.primary} />
         ) : (
           <>
-            <Text style={styles.sectionTitle}>Who is on the clock</Text>
+            <Text style={styles.sectionTitle}>1 · Tap your name</Text>
             <View style={styles.staffRow}>
               {employees.length === 0 && (
                 <Text style={styles.muted}>No staff registered yet — add them in Manager → Settings.</Text>
               )}
-              {employees.map((e) => (
-                <View key={e.id} style={[styles.staffChip, e.on_clock && styles.staffChipOn]}>
-                  <Text style={[styles.staffName, e.on_clock && styles.staffNameOn]}>{e.name}</Text>
-                  <Text style={[styles.staffState, e.on_clock && styles.staffNameOn]}>
-                    {e.on_clock ? `● ${L.punchIn.en}` : `○ ${L.punchOut.en}`}
-                  </Text>
-                </View>
-              ))}
+              {employees.map((e) => {
+                const picked = selected && selected.id === e.id;
+                return (
+                  <Pressable
+                    key={e.id}
+                    style={[
+                      styles.staffChip,
+                      e.on_clock && styles.staffChipOn,
+                      picked && styles.staffChipPicked,
+                    ]}
+                    onPress={() => { setSelected(picked ? null : e); setPin(''); }}
+                  >
+                    <Text style={[styles.staffName, e.on_clock && styles.staffNameOn]}>
+                      {picked ? '✓ ' : ''}{e.name}
+                    </Text>
+                    <Text style={[styles.staffState, e.on_clock && styles.staffNameOn]}>
+                      {e.on_clock ? `● ${L.punchIn.en}` : `○ ${L.punchOut.en}`}
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </View>
 
-            <Text style={styles.sectionTitle}>Enter your PIN</Text>
+            <Pressable style={styles.faceBtn} onPress={() => router.push('/face-punch')}>
+              <Text style={styles.faceEmoji}>😀</Text>
+              <View>
+                <Text style={styles.faceEn}>{L.scanFace.en}</Text>
+                <Text style={styles.faceGu}>{L.scanFace.gu}</Text>
+              </View>
+            </Pressable>
+
+            <Text style={styles.sectionTitle}>
+              2 · {selected ? `Enter ${selected.name}'s PIN` : 'Enter your PIN'}
+            </Text>
             <TextInput
               style={styles.pinInput}
               value={pin}
@@ -89,18 +117,18 @@ export default function Punch() {
 
             <View style={styles.btnRow}>
               <Pressable
-                style={[styles.bigBtn, { backgroundColor: colors.healthy }, (!pin || busy) && { opacity: 0.5 }]}
+                style={[styles.bigBtn, { backgroundColor: colors.healthy }, (!pin || !selected || busy) && { opacity: 0.5 }]}
                 onPress={() => doPunch('in')}
-                disabled={!pin || busy}
+                disabled={!pin || !selected || busy}
               >
                 <Text style={styles.bigEmoji}>🟢</Text>
                 <Text style={styles.bigEn}>{L.punchIn.en}</Text>
                 <Text style={styles.bigGu}>{L.punchIn.gu}</Text>
               </Pressable>
               <Pressable
-                style={[styles.bigBtn, { backgroundColor: colors.accent }, (!pin || busy) && { opacity: 0.5 }]}
+                style={[styles.bigBtn, { backgroundColor: colors.accent }, (!pin || !selected || busy) && { opacity: 0.5 }]}
                 onPress={() => doPunch('out')}
-                disabled={!pin || busy}
+                disabled={!pin || !selected || busy}
               >
                 <Text style={styles.bigEmoji}>🔴</Text>
                 <Text style={styles.bigEn}>{L.punchOut.en}</Text>
@@ -130,12 +158,19 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 15, fontWeight: '800', color: colors.textMuted, marginTop: spacing.lg, marginBottom: spacing.sm },
   staffRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   staffChip: { backgroundColor: colors.surface, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderWidth: 2, borderColor: colors.border, minWidth: 110 },
+  staffChipPicked: { borderColor: colors.primary, borderWidth: 3 },
   staffChipOn: { backgroundColor: colors.healthy, borderColor: colors.healthy },
   staffName: { fontSize: 16, fontWeight: '800', color: colors.text },
   staffNameOn: { color: colors.white },
   staffState: { fontSize: 12, fontWeight: '700', color: colors.textMuted },
 
   pinInput: { backgroundColor: colors.surface, borderWidth: 2, borderColor: colors.border, borderRadius: radius.md, fontSize: 34, letterSpacing: 10, paddingVertical: spacing.md, color: colors.text },
+
+  // Face is an EXTRA path, not a replacement — the PIN below it always works.
+  faceBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.md, backgroundColor: colors.primary, borderRadius: radius.lg, paddingVertical: spacing.lg, marginTop: spacing.xl, ...shadow.card },
+  faceEmoji: { fontSize: 40 },
+  faceEn: { color: colors.white, fontSize: 22, fontWeight: '900' },
+  faceGu: { color: colors.white, fontSize: 15, fontWeight: '700' },
 
   btnRow: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.xl },
   bigBtn: { flex: 1, borderRadius: radius.lg, alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xl, ...shadow.card },

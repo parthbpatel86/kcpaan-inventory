@@ -10,6 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { colors, radius, spacing, shadow } from '../src/lib/theme';
 import { api } from '../src/lib/api';
+import KeyboardScreen from '../src/components/KeyboardScreen';
 
 export default function Settings() {
   const router = useRouter();
@@ -22,6 +23,7 @@ export default function Settings() {
   const [newName, setNewName] = useState('');
   const [newPin, setNewPin] = useState('');
   const [addBusy, setAddBusy] = useState(false);
+  const [showRules, setShowRules] = useState(false);
 
   const loadEmployees = () =>
     api.listEmployees()
@@ -108,12 +110,84 @@ export default function Settings() {
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xl * 2 }}>
+      <KeyboardScreen>
         {loading ? (
           <ActivityIndicator color={colors.primary} />
         ) : (
           <>
-            <Text style={styles.sectionTitle}>Rules</Text>
+            <Text style={styles.sectionTitle}>Add staff</Text>
+            <View style={styles.card}>
+              <Text style={styles.fieldLabel}>Name</Text>
+              <TextInput
+                style={styles.textInput}
+                value={newName}
+                onChangeText={setNewName}
+                placeholder="e.g. Ramesh"
+                placeholderTextColor={colors.textLight}
+              />
+              <Text style={styles.fieldLabel}>4-digit PIN</Text>
+              <Text style={styles.help}>They type this to punch in and out. Keep it unique.</Text>
+              <TextInput
+                style={styles.numInput}
+                value={newPin}
+                onChangeText={setNewPin}
+                keyboardType="number-pad"
+                maxLength={4}
+                placeholder="0000"
+                placeholderTextColor={colors.textLight}
+              />
+              <Pressable style={[styles.addBtn, addBusy && { opacity: 0.5 }]} onPress={addStaff} disabled={addBusy}>
+                <Text style={styles.addBtnText}>Add staff member</Text>
+              </Pressable>
+            </View>
+
+            <Text style={styles.sectionTitle}>Staff</Text>
+            <Text style={styles.help}>
+              Staff are identified by a 4-digit PIN. The phone’s fingerprint sensor can only verify
+              the device owner — it cannot tell which employee is using the app — so the PIN is what
+              ties a punch or a sale to a person.
+            </Text>
+
+            {employees.length === 0 ? (
+              <Text style={styles.muted}>No staff registered yet.</Text>
+            ) : (
+              employees.map((e) => (
+                <View key={String(e.id)} style={styles.staffCard}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.staffName}>{e.name}</Text>
+                    <Text style={styles.staffState}>{isActive(e) ? 'Active' : 'Inactive'}</Text>
+                  </View>
+                  {isActive(e) ? (
+                    <>
+                      <Pressable
+                        style={styles.faceBtn}
+                        onPress={() =>
+                          router.push({ pathname: '/enroll-face', params: { id: e.id, name: e.name } })
+                        }
+                        hitSlop={8}
+                      >
+                        <Text style={styles.faceText}>😀 Face</Text>
+                      </Pressable>
+                      <Pressable style={styles.deactivateBtn} onPress={() => deactivate(e)} hitSlop={8}>
+                        <Text style={styles.deactivateText}>Deactivate</Text>
+                      </Pressable>
+                    </>
+                  ) : null}
+                </View>
+              ))
+            )}
+
+
+            {/* Owner-only. Parth: "Rules in the settings needs to be hidden
+                for manager as its an owner thing." Hidden behind a tap so a
+                manager cannot casually change the discount percentages. */}
+            <Pressable style={styles.ownerToggle} onPress={() => setShowRules(!showRules)}>
+              <Text style={styles.ownerToggleText}>
+                {showRules ? "▾  Owner settings" : "▸  Owner settings"}
+              </Text>
+            </Pressable>
+            {showRules ? (
+              <>
 
             <View style={styles.card}>
               <Text style={styles.fieldLabel}>Employee discount %</Text>
@@ -158,59 +232,11 @@ export default function Settings() {
               <Text style={styles.saveBtnText}>Save settings</Text>
             </Pressable>
 
-            <Text style={styles.sectionTitle}>Staff</Text>
-            <Text style={styles.help}>
-              Staff are identified by a 4-digit PIN. The phone’s fingerprint sensor can only verify
-              the device owner — it cannot tell which employee is using the app — so the PIN is what
-              ties a punch or a sale to a person.
-            </Text>
-
-            {employees.length === 0 ? (
-              <Text style={styles.muted}>No staff registered yet.</Text>
-            ) : (
-              employees.map((e) => (
-                <View key={String(e.id)} style={styles.staffCard}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.staffName}>{e.name}</Text>
-                    <Text style={styles.staffState}>{isActive(e) ? 'Active' : 'Inactive'}</Text>
-                  </View>
-                  {isActive(e) ? (
-                    <Pressable style={styles.deactivateBtn} onPress={() => deactivate(e)} hitSlop={8}>
-                      <Text style={styles.deactivateText}>Deactivate</Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-              ))
-            )}
-
-            <Text style={styles.sectionTitle}>Add staff</Text>
-            <View style={styles.card}>
-              <Text style={styles.fieldLabel}>Name</Text>
-              <TextInput
-                style={styles.textInput}
-                value={newName}
-                onChangeText={setNewName}
-                placeholder="e.g. Ramesh"
-                placeholderTextColor={colors.textLight}
-              />
-              <Text style={styles.fieldLabel}>4-digit PIN</Text>
-              <Text style={styles.help}>They type this to punch in and out. Keep it unique.</Text>
-              <TextInput
-                style={styles.numInput}
-                value={newPin}
-                onChangeText={setNewPin}
-                keyboardType="number-pad"
-                maxLength={4}
-                placeholder="0000"
-                placeholderTextColor={colors.textLight}
-              />
-              <Pressable style={[styles.addBtn, addBusy && { opacity: 0.5 }]} onPress={addStaff} disabled={addBusy}>
-                <Text style={styles.addBtnText}>Add staff member</Text>
-              </Pressable>
-            </View>
+              </>
+            ) : null}
           </>
         )}
-      </ScrollView>
+      </KeyboardScreen>
     </SafeAreaView>
   );
 }
@@ -234,6 +260,11 @@ const styles = StyleSheet.create({
   back: { color: colors.white, fontSize: 30, fontWeight: '700' },
   headerTitle: { color: colors.white, fontSize: 20, fontWeight: '800' },
   muted: { color: colors.textMuted, fontSize: 14 },
+  ownerToggle: {
+    marginTop: spacing.xl, paddingVertical: spacing.md, paddingHorizontal: spacing.md,
+    borderRadius: radius.md, backgroundColor: colors.surfaceAlt, alignItems: 'flex-start',
+  },
+  ownerToggleText: { fontSize: 15, fontWeight: '800', color: colors.textMuted },
 
   sectionTitle: { fontSize: 15, fontWeight: '800', color: colors.textMuted, marginTop: spacing.xl, marginBottom: spacing.sm },
   fieldLabel: { fontSize: 16, fontWeight: '800', color: colors.text, marginTop: spacing.sm },
@@ -246,9 +277,11 @@ const styles = StyleSheet.create({
   saveBtn: { backgroundColor: colors.primary, borderRadius: radius.lg, alignItems: 'center', paddingVertical: spacing.lg, marginTop: spacing.sm, ...shadow.card },
   saveBtnText: { color: colors.white, fontSize: 18, fontWeight: '900' },
 
-  staffCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm, borderWidth: 2, borderColor: colors.border },
+  staffCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm, borderWidth: 2, borderColor: colors.border },
   staffName: { fontSize: 17, fontWeight: '800', color: colors.text },
   staffState: { fontSize: 12, fontWeight: '700', color: colors.textMuted, marginTop: 2 },
+  faceBtn: { backgroundColor: colors.primary, borderRadius: radius.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  faceText: { color: colors.white, fontSize: 13, fontWeight: '800' },
   deactivateBtn: { backgroundColor: colors.danger, borderRadius: radius.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   deactivateText: { color: colors.white, fontSize: 13, fontWeight: '800' },
 
