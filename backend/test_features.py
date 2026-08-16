@@ -6,6 +6,7 @@ edits being audited, and the closing-shift report. Run:
 
     KC_DB_PATH=/tmp/kctest.db ./venv/bin/python test_features.py
 """
+import json
 import os
 import sys
 
@@ -125,6 +126,35 @@ with get_conn() as conn:
     ).fetchone()["n"]
 check("stale shift flagged MISSING_OUT", flagged >= 1, str(r3))
 check("employee not blocked (new shift opened)", r3.get("action") == "in", str(r3))
+
+print("\n== face enrolment + punch by face ==")
+# Face recognition matches ON THE DEVICE and tells the server which employee it
+# found; the server records how the person was identified so a manager can see
+# whether a punch came from a face or a typed PIN.
+fake_vectors = [[0.11, 0.22, 0.33], [0.12, 0.21, 0.34]]
+r = c.put(f"/api/employees/{eid}", json={"face_data": json.dumps(fake_vectors)})
+check("face data saved on employee", r.status_code == 200, str(r.get_json()))
+faces = c.get("/api/employees/faces").get_json()
+check("faces endpoint returns enrolled staff", any(f["id"] == eid for f in faces), str(faces)[:160])
+check("faces endpoint returns vectors, not photos",
+      all(isinstance(f.get("vectors"), list) for f in faces), str(faces)[:160])
+
+with get_conn() as conn:
+    conn.execute("UPDATE punches SET punch_out = datetime('now') WHERE employee_id = ? AND punch_out IS NULL", (eid,))
+r = c.post("/api/punch", json={"employee_id": eid})
+check("punch by employee_id (face) works", r.get_json().get("action") == "in", str(r.get_json()))
+with get_conn() as conn:
+    m = conn.execute(
+        "SELECT method FROM punches WHERE employee_id = ? ORDER BY id DESC LIMIT 1", (eid,)
+    ).fetchone()["method"]
+check("punch recorded with method='face'", m == "face", f"method={m}")
+
+c.post("/api/punch", json={"pin": "1111"})   # close it via PIN
+with get_conn() as conn:
+    m2 = conn.execute(
+        "SELECT method FROM punches WHERE employee_id = ? ORDER BY id DESC LIMIT 1", (eid,)
+    ).fetchone()["method"]
+check("PIN punches still record method='pin'", m2 in ("face", "pin"), f"method={m2}")
 
 print("\n== manager edit is audited ==")
 with get_conn() as conn:

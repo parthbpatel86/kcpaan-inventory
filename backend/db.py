@@ -253,6 +253,11 @@ CREATE TABLE IF NOT EXISTS employees (
     -- Reserved for a future USB/BT fingerprint reader: the phone's own
     -- biometric API cannot identify *which* employee, only the device owner.
     finger_id  TEXT,
+    -- Face recognition: JSON array of ArcFace embeddings (one per enrolment
+    -- photo). These are numeric vectors, NOT photographs — a face cannot be
+    -- reconstructed from them. Matching happens on the device; the server only
+    -- stores them so a re-installed app still recognises staff.
+    face_data  TEXT,
     active     INTEGER NOT NULL DEFAULT 1,
     created_at {ts_type} NOT NULL {ts_default}
 );
@@ -263,6 +268,8 @@ CREATE TABLE IF NOT EXISTS punches (
     punch_out   {ts_type},
     -- NULL when clean; 'MISSING_OUT' (>14h open) or 'MISSING_IN' (out with no in)
     flag        TEXT,
+    -- How the employee was identified: 'pin' | 'face' | 'manager'
+    method      TEXT NOT NULL DEFAULT 'pin',
     note        TEXT,
     created_at  {ts_type} NOT NULL {ts_default}
 );
@@ -315,6 +322,10 @@ def init_db():
             cur.execute("ALTER TABLE sales ADD COLUMN IF NOT EXISTS client_ref TEXT")
             cur.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_client_ref ON sales(client_ref)"
+            )
+            cur.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS face_data TEXT")
+            cur.execute(
+                "ALTER TABLE punches ADD COLUMN IF NOT EXISTS method TEXT NOT NULL DEFAULT 'pin'"
             )
             cur.execute(
                 "INSERT INTO settings (key, value) VALUES ('stock_pin', %s) ON CONFLICT (key) DO NOTHING",

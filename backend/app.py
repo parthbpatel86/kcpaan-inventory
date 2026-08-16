@@ -10,6 +10,7 @@ Demand color coding: weekly demand = units sold over last 28 days / 4.
   order    -> below that (reorder ASAP)
 """
 import hashlib
+import json
 import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -656,7 +657,7 @@ def create_employee():
 def update_employee(eid):
     d = request.get_json(force=True)
     sets, vals = [], []
-    for f in ("name", "pin", "active", "finger_id"):
+    for f in ("name", "pin", "active", "finger_id", "face_data"):
         if f in d:
             sets.append(f"{f} = ?")
             vals.append(d[f])
@@ -666,6 +667,29 @@ def update_employee(eid):
     with get_conn() as conn:
         conn.execute(f"UPDATE employees SET {', '.join(sets)} WHERE id = ?", vals)
     return jsonify({"ok": True})
+
+
+@app.get("/api/employees/faces")
+def employee_faces():
+    """Face embeddings for every active employee, for on-device matching.
+
+    These are ArcFace vectors, not photographs — a face cannot be rebuilt from
+    them. The device downloads them once and does the matching locally, so
+    punching still works when the shop's internet is down.
+    """
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, name, face_data FROM employees WHERE active = 1 AND face_data IS NOT NULL"
+        ).fetchall()
+    out = []
+    for r in rows:
+        try:
+            vectors = json.loads(r["face_data"]) if r["face_data"] else []
+        except (TypeError, ValueError):
+            vectors = []
+        if vectors:
+            out.append({"id": r["id"], "name": r["name"], "vectors": vectors})
+    return jsonify(out)
 
 
 @app.post("/api/punch")
@@ -679,13 +703,23 @@ def punch():
     """
     d = request.get_json(force=True)
     pin = str(d.get("pin") or "").strip()
-    if not pin:
-        return jsonify({"error": "pin required"}), 400
+    # Face recognition runs on the device (the model never leaves the phone);
+    # it tells us WHICH employee it matched. PIN stays as the fallback for when
+    # a face won't read — bad light, a mask, a queue out the door.
+    emp_id = d.get("employee_id")
+    method = "face" if (emp_id and not pin) else "pin"
+    if not pin and not emp_id:
+        return jsonify({"error": "pin or employee_id required"}), 400
 
     with get_conn() as conn:
-        emp = conn.execute(
-            "SELECT * FROM employees WHERE pin = ? AND active = 1", (pin,)
-        ).fetchone()
+        if emp_id and not pin:
+            emp = conn.execute(
+                "SELECT * FROM employees WHERE id = ? AND active = 1", (int(emp_id),)
+            ).fetchone()
+        else:
+            emp = conn.execute(
+                "SELECT * FROM employees WHERE pin = ? AND active = 1", (pin,)
+            ).fetchone()
         if not emp:
             return jsonify({"error": "unknown pin"}), 404
 
@@ -703,8 +737,8 @@ def punch():
                     "UPDATE punches SET flag = 'MISSING_OUT' WHERE id = ?", (open_p["id"],)
                 )
                 conn.execute(
-                    "INSERT INTO punches (employee_id, punch_in) VALUES (?, datetime('now'))",
-                    (emp["id"],),
+                    "INSERT INTO punches (employee_id, punch_in, method) VALUES (?, datetime('now'), ?)",
+                    (emp["id"], method),
                 )
                 return jsonify({"action": "in", "employee": emp["name"],
                                 "warning": "previous shift was not closed — manager must fix"}), 201
@@ -717,15 +751,15 @@ def punch():
         # forgot to clock in — record it flagged so a manager fixes the time.
         if d.get("intent") == "out":
             conn.execute(
-                "INSERT INTO punches (employee_id, punch_out, flag) VALUES (?, datetime('now'), 'MISSING_IN')",
-                (emp["id"],),
+                "INSERT INTO punches (employee_id, punch_out, flag, method) VALUES (?, datetime('now'), 'MISSING_IN', ?)",
+                (emp["id"], method),
             )
             return jsonify({"action": "out", "employee": emp["name"], "flag": "MISSING_IN",
                             "warning": "no punch-in found — manager must set the start time"}), 201
 
         conn.execute(
-            "INSERT INTO punches (employee_id, punch_in) VALUES (?, datetime('now'))",
-            (emp["id"],),
+            "INSERT INTO punches (employee_id, punch_in, method) VALUES (?, datetime('now'), ?)",
+            (emp["id"], method),
         )
     return jsonify({"action": "in", "employee": emp["name"]}), 201
 
