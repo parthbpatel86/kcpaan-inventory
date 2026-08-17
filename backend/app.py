@@ -652,10 +652,9 @@ def create_employee():
             "SELECT name FROM employees WHERE pin = ? AND active = 1", (pin,)
         ).fetchone()
         if clash:
-            return jsonify({
-                "error": "pin already used",
-                "used_by": clash["name"],
-            }), 409
+            # Do NOT name the holder — that tells whoever is adding staff
+            # whose PIN they just guessed. Just say it is taken.
+            return jsonify({"error": "pin already used"}), 409
         cur = conn.execute(
             "INSERT INTO employees (name, pin, finger_id) VALUES (?,?,?)",
             (name, pin, d.get("finger_id")),
@@ -684,7 +683,7 @@ def update_employee(eid):
                 (str(d["pin"]).strip(), eid),
             ).fetchone()
             if clash:
-                return jsonify({"error": "pin already used", "used_by": clash["name"]}), 409
+                return jsonify({"error": "pin already used"}), 409
         conn.execute(f"UPDATE employees SET {', '.join(sets)} WHERE id = ?", vals)
     return jsonify({"ok": True})
 

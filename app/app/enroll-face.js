@@ -1,21 +1,33 @@
-// Manager-only: enrol one employee's face.
+// Manager-only: register one employee's face.
 //
-// Takes several photos, turns each into a numeric vector on the device, and
-// PUTs only those vectors to the server. THE PHOTOS ARE DISCARDED — nothing but
-// numbers ever leaves the phone. See FACE_SCAN.md.
+// Parth: "make sure we also have a way to register a good couple of photos for
+// face to match." Five guided poses, one at a time, each checked before it is
+// accepted. A bad enrolment is the main cause of bad recognition later, so this
+// screen refuses blurry, turned-away or eyes-closed shots instead of storing
+// them and failing at 7am.
+//
+// PRIVACY: the photo is turned into a short list of proportions and then
+// discarded. No image is stored or uploaded.
 import { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Alert, ActivityIndicator } from 'react-native';
+import {
+  View, Text, StyleSheet, Pressable, Alert, ActivityIndicator,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { colors, radius, spacing, shadow } from '../src/lib/theme';
 import { api } from '../src/lib/api';
-import { L } from '../src/lib/labels';
-import { embed, EMBEDDING_SIZE } from '../src/lib/face';
+import { embedFromPhoto, reasonText, cosine } from '../src/lib/face';
 
-// Several shots beat one: the employee shifts slightly between each, so the
-// stored template covers a range of poses instead of a single frozen instant.
-const SHOTS = 5;
+// Five poses. Slight variety makes the stored template cover how someone
+// actually stands at the clock, instead of one frozen instant.
+const POSES = [
+  { key: 'straight', en: 'Look straight at the camera', gu: 'સીધું જુઓ', emoji: '😐' },
+  { key: 'smile',    en: 'Now smile',                   gu: 'સ્મિત કરો',  emoji: '🙂' },
+  { key: 'left',     en: 'Turn your head slightly left', gu: 'ડાબે ફેરવો', emoji: '👈' },
+  { key: 'right',    en: 'Now slightly right',           gu: 'જમણે ફેરવો', emoji: '👉' },
+  { key: 'close',    en: 'Hold the phone a bit closer',  gu: 'નજીક લાવો',  emoji: '🔍' },
+];
 
 export default function EnrollFace() {
   const router = useRouter();
@@ -24,26 +36,48 @@ export default function EnrollFace() {
   const [vectors, setVectors] = useState([]);
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [hint, setHint] = useState('');
   const cameraRef = useRef(null);
-  const mounted = useRef(true);
+  const alive = useRef(true);
 
-  useEffect(() => () => { mounted.current = false; }, []);
+  useEffect(() => () => { alive.current = false; }, []);
+  useEffect(() => {
+    if (permission && !permission.granted && permission.canAskAgain) requestPermission();
+  }, [permission]);
+
+  const step = vectors.length;              // which pose we are on
+  const done = step >= POSES.length;
+  const pose = POSES[Math.min(step, POSES.length - 1)];
 
   async function capture() {
-    if (busy || saving || !cameraRef.current) return;
+    if (busy || !cameraRef.current) return;
     setBusy(true);
+    setHint('');
     try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.6, skipProcessing: true });
-      const v = await embed(photo);
-      if (!v || v.length !== EMBEDDING_SIZE) {
-        Alert.alert('Could not read that one', 'Try again with more light on the face.');
-      } else if (mounted.current) {
-        setVectors((prev) => [...prev, v]);
+      const photo = await cameraRef.current.takePictureAsync({
+        quality: 0.7, skipProcessing: true,
+      });
+      const { vector, error } = await embedFromPhoto(photo.uri);
+      if (!alive.current) return;
+      if (error) {
+        setHint(reasonText(error));
+        return;
       }
+      // Guard against accidentally enrolling two different people: every shot
+      // must resemble the first one. Without this, a second person wandering
+      // into frame would be silently added to someone's template.
+      if (vectors.length > 0) {
+        const s = cosine(vector, vectors[0]);
+        if (s < 0.80) {
+          setHint('That does not look like the same person — try again.');
+          return;
+        }
+      }
+      setVectors((prev) => [...prev, vector]);
     } catch (e) {
-      Alert.alert('Camera problem', String(e.message || e));
+      setHint(String(e.message || e));
     } finally {
-      if (mounted.current) setBusy(false);
+      if (alive.current) setBusy(false);
     }
   }
 
@@ -51,136 +85,142 @@ export default function EnrollFace() {
     if (vectors.length === 0 || saving) return;
     setSaving(true);
     try {
-      // Keep every shot rather than averaging them into one: at match time we
-      // take the best of the set, so a person enrolled with and without glasses
-      // still matches. The server stores this as a JSON string.
       await api.updateEmployee(id, { face_data: JSON.stringify(vectors) });
-      Alert.alert('Face saved', `${name} can now punch in by face.`, [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
+      Alert.alert(
+        'Face registered',
+        `${name} can now clock in by looking at the camera.`,
+        [{ text: 'OK', onPress: () => router.back() }],
+      );
     } catch (e) {
       Alert.alert('Could not save', String(e.message || e));
     } finally {
-      if (mounted.current) setSaving(false);
+      if (alive.current) setSaving(false);
     }
   }
 
-  function clearFace() {
-    Alert.alert(`Remove ${name}'s face?`, 'They will go back to using their PIN only.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await api.updateEmployee(id, { face_data: null });
-            setVectors([]);
-            Alert.alert('Removed', `${name}'s face data is deleted.`);
-          } catch (e) {
-            Alert.alert('Could not remove', String(e.message || e));
-          }
-        },
-      },
-    ]);
+  if (!permission) {
+    return <SafeAreaView style={styles.center}><ActivityIndicator color={colors.primary} /></SafeAreaView>;
   }
-
-  const done = vectors.length >= SHOTS;
+  if (!permission.granted) {
+    return (
+      <SafeAreaView style={styles.center}>
+        <Text style={styles.bigEmoji}>📷</Text>
+        <Text style={styles.msg}>The camera is needed to register a face.</Text>
+        <Pressable style={styles.primaryBtn} onPress={requestPermission}>
+          <Text style={styles.primaryBtnTxt}>Allow camera</Text>
+        </Pressable>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} hitSlop={12}><Text style={styles.back}>‹</Text></Pressable>
-        <Text style={styles.headerTitle}>{name || 'Enrol face'}</Text>
+        <Text style={styles.headerTitle}>{name}</Text>
         <View style={{ width: 24 }} />
       </View>
 
-      {!permission ? (
-        <ActivityIndicator style={{ marginTop: spacing.xl }} color={colors.primary} />
-      ) : !permission.granted ? (
-        <View style={styles.centre}>
-          <Text style={styles.big}>📷</Text>
-          <Text style={styles.help}>The camera is needed to enrol a face.</Text>
-          <Pressable style={styles.primaryBtn} onPress={requestPermission}>
-            <Text style={styles.primaryBtnText}>Allow camera</Text>
-          </Pressable>
-        </View>
-      ) : (
-        <View style={{ flex: 1 }}>
-          <View style={styles.cameraWrap}>
-            <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="front" />
-            <View style={styles.oval} pointerEvents="none" />
-          </View>
+      <View style={styles.cameraWrap}>
+        <CameraView ref={cameraRef} style={styles.camera} facing="front" />
+        <View style={styles.oval} pointerEvents="none" />
+      </View>
 
-          <View style={styles.body}>
-            <Text style={styles.help}>
-              Take {SHOTS} photos. Ask them to look straight at the camera, then turn their head a
-              little each time. Good light on the face matters more than anything else.
-            </Text>
+      {/* Progress dots — five shots, one per pose */}
+      <View style={styles.dots}>
+        {POSES.map((p, i) => (
+          <View key={p.key} style={[styles.dot, i < vectors.length && styles.dotOn]} />
+        ))}
+      </View>
 
-            <View style={styles.dots}>
-              {Array.from({ length: SHOTS }).map((_, i) => (
-                <View key={i} style={[styles.dot, i < vectors.length && styles.dotOn]} />
-              ))}
-            </View>
+      <View style={styles.bottom}>
+        {done ? (
+          <>
+            <Text style={styles.poseEn}>✅ All five photos taken</Text>
+            <Text style={styles.poseGu}>બધા ફોટા થઈ ગયા</Text>
+          </>
+        ) : (
+          <>
+            <Text style={styles.poseEmoji}>{pose.emoji}</Text>
+            <Text style={styles.poseEn}>{step + 1}. {pose.en}</Text>
+            <Text style={styles.poseGu}>{pose.gu}</Text>
+          </>
+        )}
+        {hint ? <Text style={styles.hint}>{hint}</Text> : null}
 
+        <View style={styles.btnRow}>
+          {!done && (
             <Pressable
-              style={[styles.shootBtn, (busy || done) && { opacity: 0.5 }]}
+              style={[styles.shootBtn, busy && { opacity: 0.5 }]}
               onPress={capture}
-              disabled={busy || done}
+              disabled={busy}
             >
-              <Text style={styles.shootEmoji}>{busy ? '…' : '📸'}</Text>
-              <Text style={styles.shootText}>
-                {done ? 'Enough photos' : `Take photo ${vectors.length + 1} of ${SHOTS}`}
+              <Text style={styles.shootTxt}>
+                {busy ? 'Reading…' : `Take photo ${step + 1} of ${POSES.length}`}
               </Text>
             </Pressable>
-
-            <Pressable
-              style={[styles.saveBtn, (vectors.length === 0 || saving) && { opacity: 0.5 }]}
-              onPress={save}
-              disabled={vectors.length === 0 || saving}
-            >
-              <Text style={styles.saveBtnText}>{saving ? 'Saving…' : 'Save face'}</Text>
+          )}
+          {vectors.length > 0 && (
+            <Pressable style={styles.undoBtn} onPress={() => setVectors((v) => v.slice(0, -1))}>
+              <Text style={styles.undoTxt}>Undo</Text>
             </Pressable>
-
-            <Pressable onPress={clearFace} hitSlop={8}>
-              <Text style={styles.removeText}>Remove saved face</Text>
-            </Pressable>
-
-            <Text style={styles.privacy}>
-              Only numbers are saved — never the photo. {L.usePin.en} / {L.usePin.gu} always works.
-            </Text>
-          </View>
+          )}
         </View>
-      )}
+
+        <Pressable
+          style={[styles.saveBtn, (vectors.length < POSES.length || saving) && { opacity: 0.45 }]}
+          onPress={save}
+          disabled={vectors.length < POSES.length || saving}
+        >
+          <Text style={styles.saveTxt}>{saving ? 'Saving…' : 'Save face'}</Text>
+        </Pressable>
+        <Text style={styles.privacy}>
+          Only measurements are saved — no photo is stored or sent anywhere.
+        </Text>
+      </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: colors.primary, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.md, backgroundColor: colors.bg },
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: colors.primaryDark, paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
+  },
   back: { color: colors.white, fontSize: 30, fontWeight: '700' },
   headerTitle: { color: colors.white, fontSize: 20, fontWeight: '800' },
 
-  centre: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
-  big: { fontSize: 56, marginBottom: spacing.md },
-  help: { fontSize: 14, fontWeight: '600', color: colors.textMuted, textAlign: 'center', marginBottom: spacing.md },
+  cameraWrap: { flex: 1, margin: spacing.lg, borderRadius: radius.xl, overflow: 'hidden', backgroundColor: '#000' },
+  camera: { flex: 1 },
+  oval: {
+    position: 'absolute', top: '10%', left: '14%', right: '14%', bottom: '10%',
+    borderWidth: 4, borderColor: '#ffffff88', borderRadius: 999,
+  },
 
-  cameraWrap: { height: 320, margin: spacing.lg, borderRadius: radius.lg, overflow: 'hidden', backgroundColor: '#000', ...shadow.card },
-  oval: { position: 'absolute', alignSelf: 'center', top: 30, width: 200, height: 260, borderRadius: 130, borderWidth: 4, borderColor: colors.white, opacity: 0.7 },
-
-  body: { paddingHorizontal: spacing.lg },
-  dots: { flexDirection: 'row', justifyContent: 'center', gap: spacing.sm, marginBottom: spacing.lg },
-  dot: { width: 18, height: 18, borderRadius: 9, backgroundColor: colors.border },
+  dots: { flexDirection: 'row', justifyContent: 'center', gap: spacing.sm, marginBottom: spacing.sm },
+  dot: { width: 14, height: 14, borderRadius: 7, backgroundColor: colors.border },
   dotOn: { backgroundColor: colors.healthy },
 
-  shootBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, backgroundColor: colors.primary, borderRadius: radius.lg, paddingVertical: spacing.lg, ...shadow.card },
-  shootEmoji: { fontSize: 26 },
-  shootText: { color: colors.white, fontSize: 18, fontWeight: '900' },
+  bottom: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg, alignItems: 'center', gap: 4 },
+  poseEmoji: { fontSize: 34 },
+  poseEn: { fontSize: 19, fontWeight: '900', color: colors.text, textAlign: 'center' },
+  poseGu: { fontSize: 16, fontWeight: '700', color: colors.textMuted },
+  hint: { fontSize: 14, color: colors.order, fontWeight: '700', textAlign: 'center', marginTop: 4 },
 
-  saveBtn: { backgroundColor: colors.healthy, borderRadius: radius.lg, alignItems: 'center', paddingVertical: spacing.lg, marginTop: spacing.md, ...shadow.card },
-  saveBtnText: { color: colors.white, fontSize: 18, fontWeight: '900' },
+  btnRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md, alignSelf: 'stretch' },
+  shootBtn: { flex: 1, backgroundColor: colors.primary, borderRadius: radius.lg, paddingVertical: spacing.lg, alignItems: 'center', ...shadow.card },
+  shootTxt: { color: colors.white, fontSize: 16, fontWeight: '900' },
+  undoBtn: { paddingHorizontal: spacing.lg, justifyContent: 'center', borderRadius: radius.lg, backgroundColor: colors.surfaceAlt },
+  undoTxt: { color: colors.textMuted, fontWeight: '800' },
 
-  removeText: { color: colors.danger, fontSize: 14, fontWeight: '800', textAlign: 'center', marginTop: spacing.lg },
-  privacy: { fontSize: 12, fontWeight: '600', color: colors.textLight, textAlign: 'center', marginTop: spacing.md, marginBottom: spacing.xl },
+  saveBtn: { alignSelf: 'stretch', backgroundColor: colors.healthy, borderRadius: radius.lg, paddingVertical: spacing.lg, alignItems: 'center', marginTop: spacing.sm },
+  saveTxt: { color: colors.white, fontSize: 17, fontWeight: '900' },
+  privacy: { fontSize: 12, color: colors.textMuted, textAlign: 'center', marginTop: spacing.sm },
+
+  bigEmoji: { fontSize: 54 },
+  msg: { fontSize: 17, color: colors.text, textAlign: 'center' },
+  primaryBtn: { backgroundColor: colors.primary, borderRadius: radius.lg, paddingVertical: spacing.lg, paddingHorizontal: spacing.xl },
+  primaryBtnTxt: { color: colors.white, fontSize: 17, fontWeight: '900' },
 });

@@ -1,162 +1,205 @@
-// On-device face embeddings for the time clock.
+// On-device face recognition for the time clock, built on Google ML Kit.
 //
-// WHY THIS IS BUILT THE WAY IT IS
-// -------------------------------
-// The shop wants staff to walk up, look at the camera and be IDENTIFIED, with
-// no typing. A real identification pipeline needs a face *embedding* model
-// (ArcFace / MobileFaceNet) running on the phone. On this project that model
-// cannot ship today:
+// WHAT CHANGED AND WHY
+// --------------------
+// The first version compared downscaled pixel brightness. It worked with one
+// enrolled person and fell apart with two — exactly what Parth hit. Brightness
+// is a property of the room, not of the person.
 //
-//   * expo-camera 56 has NO face detection at all (it only scans barcodes).
-//   * expo-face-detector was removed after SDK 51.
-//   * onnxruntime-react-native and @react-native-ml-kit/face-detection are both
-//     legacy-bridge native modules that Expo does not pin for SDK 56, and this
-//     app runs React Native 0.85 with newArchEnabled=true. Neither can be
-//     verified from here because a Gradle build is not allowed on this machine.
+// This version uses ML Kit's FACIAL LANDMARKS: eyes, ears, nose base, cheeks
+// and mouth corners, plus the head rotation angles. From those we build a
+// signature out of RATIOS between distances — eye separation vs nose length,
+// mouth width vs eye separation, and so on.
 //
-// Shipping a half-working ArcFace pipeline into a 7am rush would be worse than
-// shipping nothing. So this module implements a REAL, self-contained embedding
-// that needs no native module: a downscaled-grayscale "appearance signature"
-// computed from the pixels of the captured face, in pure JS.
+// Ratios are the point. A raw pixel distance changes when you stand closer to
+// the camera; the ratio between two distances does not. That is what lets the
+// same person match at arm's length and at the counter, while two different
+// people stay apart.
 //
-// BE HONEST ABOUT WHAT THIS IS:
-// This is VERIFICATION-GRADE, not identification-grade. It is sensitive to
-// lighting and pose, so it is used to *rank* the staff list (the likely person
-// floats to the top and is pre-selected) and the employee confirms with one
-// tap. It is NOT trusted to silently punch someone in on its own.
-// See FACE_SCAN.md. The vector format is deliberately the same shape the server
-// already stores, so swapping in ArcFace later changes only `embed()`.
-import * as ImageManipulator from 'expo-image-manipulator';
-import { decodeJpegGray } from './jpeg';
+// PRIVACY: no photograph is ever stored or uploaded. What we keep is a short
+// list of numbers describing proportions. A face cannot be reconstructed from
+// them.
+import FaceDetection from '@react-native-ml-kit/face-detection';
 
-// Face signature grid. 16x16 = 256 dims, matching the order of magnitude of a
-// real face embedding while staying cheap enough to compute in JS on a phone.
-const GRID = 16;
-export const EMBEDDING_SIZE = GRID * GRID;
+/** Landmarks we require. If ML Kit cannot find all of these, we do not guess. */
+const REQUIRED = [
+  'leftEye', 'rightEye', 'noseBase', 'mouthLeft', 'mouthRight',
+];
 
-// Cosine-similarity thresholds. These are NOT guesses — they were measured on
-// the bench (see audit-trail/face-scan-2026-08-16.md). Across 5 synthetic
-// identities enrolled with 3 shots each and probed with a shifted/brighter
-// shot, genuine best-of-N scores landed in 0.77-0.87 and impostor scores never
-// exceeded 0.23. So the populations are separated by a wide margin, but the
-// absolute genuine score sits well below 0.9 — an intuitive-looking 0.9 cutoff
-// would reject real staff all morning.
-//
-// SEPARATION is what we trust, not the absolute number: the top match must also
-// beat the runner-up by MIN_MARGIN before we treat it as confident.
-export const MATCH_THRESHOLD = 0.70;
-// Below this we do not even suggest a name.
-export const SUGGEST_THRESHOLD = 0.55;
-// The winner must lead second place by this much to punch without confirmation.
-export const MIN_MARGIN = 0.15;
+/** Extra landmarks that improve accuracy when present. */
+const OPTIONAL = ['leftEar', 'rightEar', 'leftCheek', 'rightCheek', 'mouthBottom'];
 
-// Crop the middle of the frame where the face guide oval sits, then shrink to a
-// tiny grayscale grid. Cropping first removes most of the background, which is
-// what otherwise dominates a whole-image signature.
-async function faceCropBase64(uri, width, height) {
-  // Centre box: 60% of the shorter side, biased slightly up where a head sits.
-  const side = Math.round(Math.min(width, height) * 0.6);
-  const originX = Math.max(0, Math.round((width - side) / 2));
-  const originY = Math.max(0, Math.round((height - side) / 2 - height * 0.05));
+export const SIGNATURE_VERSION = 2;   // bump when the maths changes
 
-  const ctx = ImageManipulator.ImageManipulator.manipulate(uri);
-  ctx.crop({ originX, originY, width: side, height: Math.min(side, height - originY) });
-  ctx.resize({ width: GRID, height: GRID });
-  const image = await ctx.renderAsync();
-  const out = await image.saveAsync({
-    base64: true,
-    compress: 1,
-    format: ImageManipulator.SaveFormat.JPEG,
+function dist(a, b) {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function pt(landmarks, name) {
+  const l = landmarks && landmarks[name];
+  return l && l.position ? l.position : null;
+}
+
+/**
+ * Turn one detected face into a scale-invariant signature.
+ *
+ * Every measurement is divided by the distance between the eyes, so the
+ * numbers describe the SHAPE of the face rather than how big it appeared.
+ * Returns null when the face is too turned away or landmarks are missing —
+ * refusing to produce a bad signature is better than storing one.
+ */
+export function signatureFromFace(face) {
+  if (!face || !face.landmarks) return null;
+
+  // A face turned too far gives distorted geometry. Reject rather than record.
+  const yaw = Math.abs(face.rotationY ?? 0);
+  const roll = Math.abs(face.rotationZ ?? 0);
+  if (yaw > 20 || roll > 20) return null;
+
+  const lm = face.landmarks;
+  for (const name of REQUIRED) {
+    if (!pt(lm, name)) return null;
+  }
+
+  const leftEye = pt(lm, 'leftEye');
+  const rightEye = pt(lm, 'rightEye');
+  const nose = pt(lm, 'noseBase');
+  const mouthL = pt(lm, 'mouthLeft');
+  const mouthR = pt(lm, 'mouthRight');
+
+  // The yardstick. Everything else is expressed relative to this.
+  const eyeGap = dist(leftEye, rightEye);
+  if (!eyeGap || eyeGap < 1) return null;
+
+  const eyeMid = { x: (leftEye.x + rightEye.x) / 2, y: (leftEye.y + rightEye.y) / 2 };
+  const mouthMid = { x: (mouthL.x + mouthR.x) / 2, y: (mouthL.y + mouthR.y) / 2 };
+
+  const v = [
+    dist(eyeMid, nose) / eyeGap,          // how long the nose sits below the eyes
+    dist(nose, mouthMid) / eyeGap,        // nose base to mouth
+    dist(eyeMid, mouthMid) / eyeGap,      // whole mid-face length
+    dist(mouthL, mouthR) / eyeGap,        // mouth width
+    dist(leftEye, nose) / eyeGap,         // left eye to nose
+    dist(rightEye, nose) / eyeGap,        // right eye to nose  (asymmetry shows here)
+    dist(leftEye, mouthL) / eyeGap,
+    dist(rightEye, mouthR) / eyeGap,
+  ];
+
+  // Optional landmarks add discriminating power when ML Kit finds them. A
+  // sentinel of 0 keeps the vector the same length either way, so signatures
+  // stay comparable.
+  const ears = [
+    pt(lm, 'leftEar'), pt(lm, 'rightEar'),
+    pt(lm, 'leftCheek'), pt(lm, 'rightCheek'), pt(lm, 'mouthBottom'),
+  ];
+  v.push(ears[0] && ears[1] ? dist(ears[0], ears[1]) / eyeGap : 0);   // head width
+  v.push(ears[2] && ears[3] ? dist(ears[2], ears[3]) / eyeGap : 0);   // cheek width
+  v.push(ears[4] ? dist(nose, ears[4]) / eyeGap : 0);                 // nose to chin-ish
+
+  // Face box proportion — a long face vs a round one.
+  if (face.frame && face.frame.width > 0) {
+    v.push(face.frame.height / face.frame.width);
+  } else {
+    v.push(0);
+  }
+
+  return v;
+}
+
+/** Detect the most prominent face in a photo and return its signature. */
+export async function embedFromPhoto(uri) {
+  const faces = await FaceDetection.detect(uri, {
+    performanceMode: 'accurate',
+    landmarkMode: 'all',
+    classificationMode: 'all',
+    minFaceSize: 0.15,
   });
-  return out.base64;
+  if (!faces || faces.length === 0) return { error: 'no_face' };
+  if (faces.length > 1) return { error: 'many_faces' };
+
+  const face = faces[0];
+  // Eyes closed or mid-blink distorts the eye landmarks we measure from.
+  const eyesOpen = Math.min(
+    face.leftEyeOpenProbability ?? 1,
+    face.rightEyeOpenProbability ?? 1,
+  );
+  if (eyesOpen < 0.3) return { error: 'eyes_closed' };
+
+  const vector = signatureFromFace(face);
+  if (!vector) return { error: 'bad_angle' };
+  return { vector };
 }
 
-// Turn one captured photo into a normalised vector.
-// Returns null when the photo cannot be read at all.
-export async function embed(photo) {
-  if (!photo?.uri) return null;
-  const b64 = await faceCropBase64(photo.uri, photo.width, photo.height);
-  if (!b64) return null;
-  const gray = decodeJpegGray(b64, GRID, GRID);
-  if (!gray) return null;
-  return normalise(contrastNormalise(gray));
-}
-
-// Remove overall brightness/contrast so the same face under the shop's morning
-// light and its evening light still land near each other. This is the single
-// biggest robustness win available without a real CNN.
-function contrastNormalise(v) {
-  const n = v.length;
-  let mean = 0;
-  for (let i = 0; i < n; i++) mean += v[i];
-  mean /= n;
-  let sd = 0;
-  for (let i = 0; i < n; i++) sd += (v[i] - mean) ** 2;
-  sd = Math.sqrt(sd / n) || 1;
-  const out = new Array(n);
-  for (let i = 0; i < n; i++) out[i] = (v[i] - mean) / sd;
-  return out;
-}
-
-// Unit length, so cosine similarity is a plain dot product.
-function normalise(v) {
-  let mag = 0;
-  for (let i = 0; i < v.length; i++) mag += v[i] * v[i];
-  mag = Math.sqrt(mag) || 1;
-  return v.map((x) => Number((x / mag).toFixed(5)));
-}
-
+/** Cosine similarity, -1..1. Two signatures of the same face sit near 1. */
 export function cosine(a, b) {
   if (!a || !b || a.length !== b.length) return -1;
-  let dot = 0;
-  for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
-  return dot;
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  if (na === 0 || nb === 0) return -1;
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
-// Average several enrolment shots into one prototype vector. Averaging across
-// poses/lighting is what makes the stored template more forgiving than any
-// single photo.
-export function averageVectors(vectors) {
-  const valid = (vectors || []).filter((v) => Array.isArray(v) && v.length === EMBEDDING_SIZE);
-  if (valid.length === 0) return null;
-  const sum = new Array(EMBEDDING_SIZE).fill(0);
-  for (const v of valid) for (let i = 0; i < EMBEDDING_SIZE; i++) sum[i] += v[i];
-  return normalise(sum.map((x) => x / valid.length));
-}
+// Matching thresholds.
+//
+// With ~10 staff the job is to tell ten people apart, not to find one face in
+// a million — a far easier problem. Two rules must BOTH hold:
+//
+//   1. the best match must clear MIN_SCORE, and
+//   2. it must beat the runner-up by MIN_MARGIN.
+//
+// Rule 2 is the important one. If two staff score 0.97 and 0.96 the top score
+// looks excellent but the app has not actually distinguished them, and
+// guessing would put the wrong person's hours on the payroll. In that case we
+// say we are unsure and let them tap a name.
+export const MIN_SCORE = 0.90;
+export const MIN_MARGIN = 0.03;
 
-// Score a probe vector against every enrolled employee.
-// `faces` is the payload of GET /api/employees/faces:
-//   [{ id, name, vectors: [[...], [...]] }]
-// Each employee keeps several vectors; the best one wins, so a person enrolled
-// with and without glasses still matches.
-export function rank(probe, faces) {
-  const scored = (faces || []).map((f) => {
+/**
+ * Compare a probe signature against enrolled staff.
+ *
+ * enrolled: [{ id, name, vectors: [[...], ...] }]
+ * Returns { match, score, margin, runnerUp, confident }.
+ */
+export function identify(probe, enrolled) {
+  const scored = [];
+  for (const person of enrolled || []) {
     let best = -1;
-    for (const v of f.vectors || []) {
+    for (const v of person.vectors || []) {
       const s = cosine(probe, v);
       if (s > best) best = s;
     }
-    return { id: f.id, name: f.name, score: best };
-  });
+    if (best > -1) scored.push({ person, score: best });
+  }
+  if (scored.length === 0) return { match: null, score: 0, margin: 0, confident: false };
+
   scored.sort((a, b) => b.score - a.score);
-  return scored;
+  const top = scored[0];
+  const second = scored[1];
+  const margin = second ? top.score - second.score : 1;
+  const confident = top.score >= MIN_SCORE && margin >= MIN_MARGIN;
+
+  return {
+    match: top.person,
+    score: top.score,
+    margin,
+    runnerUp: second ? second.person : null,
+    confident,
+  };
 }
 
-// The decision the UI acts on.
-//   confident — one clear winner, comfortably ahead of the runner-up
-//   suggest   — probably this person, but confirm with a tap
-//   unknown   — show the full staff list instead
-export function decide(probe, faces) {
-  const scored = rank(probe, faces);
-  if (scored.length === 0 || scored[0].score < SUGGEST_THRESHOLD) {
-    return { verdict: 'unknown', scored };
+/** Plain-language reason a scan failed, for the screen to show. */
+export function reasonText(error) {
+  switch (error) {
+    case 'no_face': return 'No face seen — hold the phone up and look at it.';
+    case 'many_faces': return 'More than one face — only one person at a time.';
+    case 'eyes_closed': return 'Eyes were closed — try again.';
+    case 'bad_angle': return 'Head turned too far — look straight at the camera.';
+    default: return 'Could not read the face.';
   }
-  const top = scored[0];
-  const runnerUp = scored[1]?.score ?? -1;
-  // A clear win needs to beat the threshold AND separate from second place,
-  // otherwise two similar-looking staff could swap punches.
-  if (top.score >= MATCH_THRESHOLD && top.score - runnerUp >= MIN_MARGIN) {
-    return { verdict: 'confident', match: top, scored };
-  }
-  return { verdict: 'suggest', match: top, scored };
 }

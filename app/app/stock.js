@@ -26,6 +26,7 @@ export default function Stock() {
   const [search, setSearch] = useState('');
   // Deep-link: /stock?filter=reorder opens straight into the reorder list.
   const [filter, setFilter] = useState(params.filter === 'reorder' ? 'reorder' : 'all');
+  const [quickEdit, setQuickEdit] = useState(null);   // product whose numbers are being typed
 
   const load = useCallback(async () => {
     try {
@@ -116,11 +117,13 @@ export default function Stock() {
             label="Shop"
             value={item.shop_qty}
             onChange={(d) => bump(item, 'shop', d)}
+            onTapNumber={() => setQuickEdit(item)}
           />
           <StockCounter
             label="WH"
             value={item.warehouse_qty}
             onChange={(d) => bump(item, 'warehouse', d)}
+            onTapNumber={() => setQuickEdit(item)}
             muted
           />
         </View>
@@ -193,6 +196,14 @@ export default function Stock() {
           </View>
         }
       />
+
+      {quickEdit && (
+        <QuickStockSheet
+          product={quickEdit}
+          onClose={() => setQuickEdit(null)}
+          onSaved={() => { setQuickEdit(null); load(); }}
+        />
+      )}
 
       {editProduct && (
         <EditModal
@@ -387,7 +398,7 @@ function AdjustRow({ label, value, onChange, onApply }) {
 }
 
 /** Label + [−] value [+] — the whole point is no extra screens or taps. */
-function StockCounter({ label, value, onChange, muted }) {
+function StockCounter({ label, value, onChange, onTapNumber, muted }) {
   return (
     <View style={[styles.counter, muted && styles.counterMuted]}>
       <Text style={styles.counterLabel}>{label}</Text>
@@ -399,7 +410,11 @@ function StockCounter({ label, value, onChange, muted }) {
       >
         <Text style={styles.counterBtnTxt}>−</Text>
       </Pressable>
-      <Text style={styles.counterVal}>{value}</Text>
+      {/* Tap the number to type it. Getting to 100 by tapping + is not a
+          thing anyone will do at a real counter. */}
+      <Pressable onPress={onTapNumber} hitSlop={8}>
+        <Text style={styles.counterVal}>{value}</Text>
+      </Pressable>
       <Pressable style={styles.counterBtn} onPress={() => onChange(1)} hitSlop={8}>
         <Text style={styles.counterBtnTxt}>+</Text>
       </Pressable>
@@ -407,7 +422,123 @@ function StockCounter({ label, value, onChange, muted }) {
   );
 }
 
+/** Type an exact count, or move stock warehouse -> shop, in one sheet. */
+function QuickStockSheet({ product, onClose, onSaved }) {
+  const [shop, setShop] = useState(String(product.shop_qty));
+  const [wh, setWh] = useState(String(product.warehouse_qty));
+  const [move, setMove] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const shopN = parseInt(shop, 10);
+  const whN = parseInt(wh, 10);
+  const moveN = parseInt(move, 10) || 0;
+  const valid = Number.isFinite(shopN) && shopN >= 0 && Number.isFinite(whN) && whN >= 0;
+
+  async function save() {
+    if (!valid || busy) return;
+    setBusy(true);
+    try {
+      // Set exact counts by sending the difference, so stock_moves still
+      // records what changed rather than silently overwriting history.
+      const dShop = shopN - product.shop_qty;
+      const dWh = whN - product.warehouse_qty;
+      if (dShop) {
+        await api.adjustStock(product.id, {
+          kind: dShop > 0 ? 'add' : 'remove', location: 'shop',
+          delta: dShop, note: 'set count',
+        });
+      }
+      if (dWh) {
+        await api.adjustStock(product.id, {
+          kind: dWh > 0 ? 'add' : 'remove', location: 'warehouse',
+          delta: dWh, note: 'set count',
+        });
+      }
+      if (moveN > 0) {
+        await api.adjustStock(product.id, {
+          kind: 'move', delta: moveN, note: 'warehouse->shop',
+        });
+      }
+      onSaved();
+    } catch (e) {
+      Alert.alert('Could not save', String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        style={styles.qsBg}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <View style={styles.qsSheet}>
+          <Text style={styles.qsTitle}>{product.name}</Text>
+
+          <View style={styles.qsRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.qsLabel}>Shop</Text>
+              <TextInput
+                style={styles.qsInput} value={shop} onChangeText={setShop}
+                keyboardType="number-pad" selectTextOnFocus textAlign="center"
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.qsLabel}>Warehouse</Text>
+              <TextInput
+                style={styles.qsInput} value={wh} onChangeText={setWh}
+                keyboardType="number-pad" selectTextOnFocus textAlign="center"
+              />
+            </View>
+          </View>
+
+          <Text style={styles.qsLabel}>Move warehouse → shop</Text>
+          <TextInput
+            style={styles.qsInput} value={move} onChangeText={setMove}
+            keyboardType="number-pad" placeholder="0"
+            placeholderTextColor={colors.textLight} textAlign="center"
+          />
+          {moveN > 0 && (
+            <Text style={styles.qsPreview}>
+              Shop {shopN + moveN} · Warehouse {Math.max(0, whN - moveN)}
+            </Text>
+          )}
+
+          <View style={styles.qsBtnRow}>
+            <Pressable style={styles.qsCancel} onPress={onClose} disabled={busy}>
+              <Text style={styles.qsCancelTxt}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.qsSave, (!valid || busy) && { opacity: 0.5 }]}
+              onPress={save}
+              disabled={!valid || busy}
+            >
+              <Text style={styles.qsSaveTxt}>{busy ? 'Saving…' : 'Save'}</Text>
+            </Pressable>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
 const styles = StyleSheet.create({
+  qsBg: { flex: 1, backgroundColor: '#000000aa', justifyContent: 'center', padding: spacing.lg },
+  qsSheet: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, gap: spacing.sm },
+  qsTitle: { fontSize: 19, fontWeight: '900', color: colors.text, marginBottom: 4 },
+  qsRow: { flexDirection: 'row', gap: spacing.md },
+  qsLabel: { fontSize: 13, fontWeight: '800', color: colors.textMuted, marginTop: spacing.sm },
+  qsInput: {
+    borderWidth: 2, borderColor: colors.border, borderRadius: radius.md,
+    paddingVertical: spacing.md, fontSize: 26, fontWeight: '900', color: colors.text,
+  },
+  qsPreview: { fontSize: 14, fontWeight: '700', color: colors.primary, textAlign: 'center', marginTop: 4 },
+  qsBtnRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  qsCancel: { flex: 1, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.surfaceAlt, alignItems: 'center' },
+  qsCancelTxt: { fontWeight: '700', color: colors.textMuted },
+  qsSave: { flex: 1, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.primary, alignItems: 'center' },
+  qsSaveTxt: { fontWeight: '800', color: colors.white },
   counterRow: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.md, paddingBottom: spacing.md },
   counter: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',

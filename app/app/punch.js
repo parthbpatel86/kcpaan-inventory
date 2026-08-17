@@ -28,13 +28,13 @@ export default function Punch() {
 
   useEffect(() => { load(); }, []);
 
-  async function doPunch(intent) {
+  async function doPunch() {
     // Identity comes from the SELECTED person, not from the PIN alone. If two
     // people ever shared a PIN, a PIN-only punch could clock in the wrong one.
     if (!selected || !pin.trim() || busy) return;
     setBusy(true);
     try {
-      const res = await api.punch(pin.trim(), intent, selected.id);
+      const res = await api.punch(pin.trim(), undefined, selected.id);
       const verb = res.action === 'in' ? 'Punched IN' : 'Punched OUT';
       Alert.alert(`${verb} — ${res.employee}`, res.warning ? `⚠️ ${res.warning}` : timeNow());
       setPin('');
@@ -115,26 +115,31 @@ export default function Punch() {
               textAlign="center"
             />
 
-            <View style={styles.btnRow}>
-              <Pressable
-                style={[styles.bigBtn, { backgroundColor: colors.healthy }, (!pin || !selected || busy) && { opacity: 0.5 }]}
-                onPress={() => doPunch('in')}
-                disabled={!pin || !selected || busy}
-              >
-                <Text style={styles.bigEmoji}>🟢</Text>
-                <Text style={styles.bigEn}>{L.punchIn.en}</Text>
-                <Text style={styles.bigGu}>{L.punchIn.gu}</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.bigBtn, { backgroundColor: colors.accent }, (!pin || !selected || busy) && { opacity: 0.5 }]}
-                onPress={() => doPunch('out')}
-                disabled={!pin || !selected || busy}
-              >
-                <Text style={styles.bigEmoji}>🔴</Text>
-                <Text style={styles.bigEn}>{L.punchOut.en}</Text>
-                <Text style={styles.bigGu}>{L.punchOut.gu}</Text>
-              </Pressable>
-            </View>
+            {/* One button. The server already knows whether this person has an
+                open shift, so asking them to choose IN or OUT is a decision we
+                can make for them. */}
+            <Pressable
+              style={[
+                styles.punchBtn,
+                { backgroundColor: selected && selected.on_clock ? colors.accent : colors.healthy },
+                (!pin || !selected || busy) && { opacity: 0.5 },
+              ]}
+              onPress={() => doPunch()}
+              disabled={!pin || !selected || busy}
+            >
+              <Text style={styles.punchEmoji}>
+                {selected && selected.on_clock ? '🔴' : '🟢'}
+              </Text>
+              <Text style={styles.punchEn}>
+                {selected
+                  ? (selected.on_clock ? `${L.punchOut.en} — ${selected.name}` : `${L.punchIn.en} — ${selected.name}`)
+                  : 'Tap your name first'}
+              </Text>
+              <Text style={styles.punchGu}>
+                {selected ? (selected.on_clock ? L.punchOut.gu : L.punchIn.gu) : ''}
+              </Text>
+            </Pressable>
+
             {busy && <ActivityIndicator style={{ marginTop: spacing.lg }} color={colors.primary} />}
           </>
         )}
@@ -164,6 +169,10 @@ const styles = StyleSheet.create({
   staffNameOn: { color: colors.white },
   staffState: { fontSize: 12, fontWeight: '700', color: colors.textMuted },
 
+  punchBtn: { borderRadius: radius.lg, alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xl, marginTop: spacing.xl, ...shadow.card },
+  punchEmoji: { fontSize: 44 },
+  punchEn: { color: colors.white, fontSize: 22, fontWeight: '900', marginTop: 4, textAlign: 'center' },
+  punchGu: { color: colors.white, fontSize: 16, fontWeight: '700' },
   pinInput: { backgroundColor: colors.surface, borderWidth: 2, borderColor: colors.border, borderRadius: radius.md, fontSize: 34, letterSpacing: 10, paddingVertical: spacing.md, color: colors.text },
 
   // Face is an EXTRA path, not a replacement — the PIN below it always works.

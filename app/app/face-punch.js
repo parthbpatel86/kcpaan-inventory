@@ -1,227 +1,276 @@
-// Employee-facing: punch in/out by face.
+// Face clock-in. Walk up, look at the phone, done.
 //
-// The whole match runs on the device. A photo is taken, turned into numbers,
-// compared against the vectors downloaded from the server, and thrown away.
+// Parth: "When clicking on the scan face, it should automatically start
+// scanning after hitting the scan face and do 3 retry if it fails." — so this
+// screen starts scanning the moment it opens, retries by itself, and never
+// asks which button to press. The server decides IN vs OUT from whether the
+// person already has an open shift.
 //
-// SAFETY RULE: this screen never silently punches anyone. It picks the most
-// likely person and shows a big IN / OUT button to confirm. That is deliberate
-// — the on-device signature is verification-grade, not identification-grade
-// (see FACE_SCAN.md), and punching the wrong person in is worse than one tap.
-// "Use PIN" is always one tap away.
-import { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Alert, ActivityIndicator, ScrollView } from 'react-native';
+// If three attempts cannot identify someone confidently, it falls back to the
+// PIN screen rather than guessing. Putting the wrong person's hours on the
+// payroll is worse than asking for four digits.
+import { useEffect, useRef, useState, useCallback } from 'react';
+import {
+  View, Text, StyleSheet, Pressable, ActivityIndicator,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { colors, radius, spacing, shadow } from '../src/lib/theme';
 import { api } from '../src/lib/api';
 import { L } from '../src/lib/labels';
-import { embed, decide } from '../src/lib/face';
+import { embedFromPhoto, identify, reasonText } from '../src/lib/face';
+
+const MAX_TRIES = 3;
 
 export default function FacePunch() {
   const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
-  const [faces, setFaces] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [scanning, setScanning] = useState(false);
-  const [result, setResult] = useState(null); // { verdict, match, scored }
-  const [busy, setBusy] = useState(false);
+  const [enrolled, setEnrolled] = useState(null);
+  const [status, setStatus] = useState('starting');  // starting|scanning|done|failed
+  const [attempt, setAttempt] = useState(0);
+  const [message, setMessage] = useState('');
+  const [result, setResult] = useState(null);
   const cameraRef = useRef(null);
-  const mounted = useRef(true);
+  const alive = useRef(true);
+  const running = useRef(false);
+
+  useEffect(() => () => { alive.current = false; }, []);
+
+  // Ask for the camera the moment we arrive — one less tap.
+  useEffect(() => {
+    if (permission && !permission.granted && permission.canAskAgain) {
+      requestPermission();
+    }
+  }, [permission]);
 
   useEffect(() => {
-    mounted.current = true;
     api.employeeFaces()
-      .then((f) => { if (mounted.current) setFaces(Array.isArray(f) ? f : []); })
-      .catch(() => {})
-      .finally(() => { if (mounted.current) setLoading(false); });
-    return () => { mounted.current = false; };
+      .then((rows) => setEnrolled(Array.isArray(rows) ? rows : []))
+      .catch(() => setEnrolled([]));
   }, []);
 
-  async function scan() {
-    if (scanning || !cameraRef.current) return;
-    setScanning(true);
-    setResult(null);
+  const punch = useCallback(async (person) => {
     try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.6, skipProcessing: true });
-      const v = await embed(photo);
-      if (!v) {
-        Alert.alert('Could not read the face', 'Use the PIN instead.');
-        return;
+      // No intent: the server toggles based on whether a shift is open, so
+      // staff never choose between IN and OUT.
+      const res = await api.punch(null, undefined, person.id);
+      setResult({
+        action: res.action,
+        name: res.employee || person.name,
+        warning: res.warning,
+      });
+      setStatus('done');
+    } catch (e) {
+      setMessage(String(e.message || e));
+      setStatus('failed');
+    }
+  }, []);
+
+  const scanOnce = useCallback(async () => {
+    if (!cameraRef.current) return { ok: false, why: 'Camera not ready' };
+    let photo;
+    try {
+      photo = await cameraRef.current.takePictureAsync({
+        quality: 0.6,
+        skipProcessing: true,
+      });
+    } catch (e) {
+      return { ok: false, why: 'Camera error' };
+    }
+    const { vector, error } = await embedFromPhoto(photo.uri);
+    if (error) return { ok: false, why: reasonText(error) };
+
+    const r = identify(vector, enrolled || []);
+    if (!r.match) return { ok: false, why: 'Nobody is enrolled yet' };
+    if (!r.confident) {
+      // Either the score was low, or two people scored too close together.
+      return {
+        ok: false,
+        why: r.runnerUp
+          ? 'Not sure who that is — too close a match'
+          : 'Face not recognised',
+      };
+    }
+    return { ok: true, person: r.match };
+  }, [enrolled]);
+
+  // Auto-run: scan up to MAX_TRIES times without the employee pressing anything.
+  useEffect(() => {
+    if (!permission?.granted || enrolled === null || running.current) return;
+    if (status !== 'starting' && status !== 'scanning') return;
+
+    running.current = true;
+    (async () => {
+      for (let i = 1; i <= MAX_TRIES; i++) {
+        if (!alive.current) return;
+        setAttempt(i);
+        setStatus('scanning');
+        setMessage(i === 1 ? '' : `Try ${i} of ${MAX_TRIES}…`);
+        // Give the camera a moment to settle and the person to look up.
+        await new Promise((r) => setTimeout(r, i === 1 ? 900 : 700));
+        if (!alive.current) return;
+
+        const out = await scanOnce();
+        if (!alive.current) return;
+        if (out.ok) {
+          await punch(out.person);
+          running.current = false;
+          return;
+        }
+        setMessage(out.why);
       }
-      const d = decide(v, faces);
-      if (mounted.current) setResult(d);
-    } catch (e) {
-      Alert.alert('Camera problem', String(e.message || e));
-    } finally {
-      if (mounted.current) setScanning(false);
-    }
+      setStatus('failed');
+      running.current = false;
+    })();
+  }, [permission?.granted, enrolled, scanOnce, punch]);
+
+  function retry() {
+    running.current = false;
+    setAttempt(0);
+    setMessage('');
+    setStatus('starting');
   }
 
-  async function punch(employeeId, intent, who) {
-    if (busy) return;
-    setBusy(true);
-    try {
-      const res = await api.punchByFace(employeeId, intent);
-      const verb = res.action === 'in' ? 'Punched IN' : 'Punched OUT';
-      Alert.alert(`${verb} — ${res.employee || who}`, res.warning ? `⚠️ ${res.warning}` : timeNow(), [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
-    } catch (e) {
-      Alert.alert('Could not punch', `${String(e.message || e)}\n\nUse your PIN instead.`);
-    } finally {
-      if (mounted.current) setBusy(false);
-    }
+  // --- permission states -------------------------------------------------
+  if (!permission) {
+    return <Center><ActivityIndicator color={colors.primary} /></Center>;
+  }
+  if (!permission.granted) {
+    return (
+      <Center>
+        <Text style={styles.bigEmoji}>📷</Text>
+        <Text style={styles.msg}>The camera is needed to scan a face.</Text>
+        <Pressable style={styles.primaryBtn} onPress={requestPermission}>
+          <Text style={styles.primaryBtnTxt}>Allow camera</Text>
+        </Pressable>
+        <Pressable style={styles.linkBtn} onPress={() => router.replace('/punch')}>
+          <Text style={styles.linkTxt}>{L.usePin.en} · {L.usePin.gu}</Text>
+        </Pressable>
+      </Center>
+    );
   }
 
-  const noneEnrolled = !loading && faces.length === 0;
+  // --- success -----------------------------------------------------------
+  if (status === 'done' && result) {
+    const isIn = result.action === 'in';
+    return (
+      <SafeAreaView style={[styles.safe, { backgroundColor: isIn ? colors.healthy : colors.instore }]}>
+        <View style={styles.doneWrap}>
+          <Text style={styles.doneEmoji}>{isIn ? '👋' : '🏁'}</Text>
+          <Text style={styles.doneName}>{result.name}</Text>
+          <Text style={styles.doneAction}>
+            {isIn ? `${L.punchIn.en} · ${L.punchIn.gu}` : `${L.punchOut.en} · ${L.punchOut.gu}`}
+          </Text>
+          <Text style={styles.doneTime}>
+            {new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+          </Text>
+          {result.warning ? <Text style={styles.doneWarn}>⚠️ {result.warning}</Text> : null}
+          <Pressable style={styles.doneBtn} onPress={() => router.replace('/')}>
+            <Text style={styles.doneBtnTxt}>{L.done.en} · {L.done.gu}</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
+  // --- scanning / failed --------------------------------------------------
+  const failed = status === 'failed';
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12}><Text style={styles.back}>‹</Text></Pressable>
-        <Text style={styles.headerTitle}>{L.scanFace.en} / {L.scanFace.gu}</Text>
+        <Pressable onPress={() => router.back()} hitSlop={12}>
+          <Text style={styles.back}>‹</Text>
+        </Pressable>
+        <Text style={styles.headerTitle}>{L.scanFace.en}</Text>
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: spacing.lg }}>
-        {loading ? (
-          <ActivityIndicator color={colors.primary} />
-        ) : !permission ? (
-          <ActivityIndicator color={colors.primary} />
-        ) : !permission.granted ? (
-          <View style={styles.centre}>
-            <Text style={styles.big}>📷</Text>
-            <Pressable style={styles.primaryBtn} onPress={requestPermission}>
-              <Text style={styles.primaryBtnText}>Allow camera</Text>
-            </Pressable>
-            <Pressable style={styles.pinLink} onPress={() => router.back()}>
-              <Text style={styles.pinLinkText}>{L.usePin.en} / {L.usePin.gu}</Text>
-            </Pressable>
-          </View>
-        ) : noneEnrolled ? (
-          <View style={styles.centre}>
-            <Text style={styles.big}>😀</Text>
-            <Text style={styles.help}>
-              No faces saved yet. A manager adds them in Settings → Staff → Face.
-            </Text>
-            <Pressable style={styles.pinLink} onPress={() => router.back()}>
-              <Text style={styles.pinLinkText}>{L.usePin.en} / {L.usePin.gu}</Text>
-            </Pressable>
-          </View>
+      <View style={styles.cameraWrap}>
+        <CameraView ref={cameraRef} style={styles.camera} facing="front" />
+        <View style={styles.oval} pointerEvents="none" />
+      </View>
+
+      <View style={styles.statusWrap}>
+        {!failed ? (
+          <>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={styles.lookTxt}>{L.lookAtCamera.en}</Text>
+            <Text style={styles.lookGu}>{L.lookAtCamera.gu}</Text>
+            {attempt > 1 && <Text style={styles.tryTxt}>{message}</Text>}
+          </>
         ) : (
           <>
-            <View style={styles.cameraWrap}>
-              <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="front" />
-              <View style={styles.oval} pointerEvents="none" />
+            <Text style={styles.failEmoji}>😕</Text>
+            <Text style={styles.failTxt}>{message || 'Could not recognise the face.'}</Text>
+            <View style={styles.btnRow}>
+              <Pressable style={styles.retryBtn} onPress={retry}>
+                <Text style={styles.retryTxt}>{L.tryAgain.en} · {L.tryAgain.gu}</Text>
+              </Pressable>
+              <Pressable style={styles.pinBtn} onPress={() => router.replace('/punch')}>
+                <Text style={styles.pinTxt}>{L.usePin.en} · {L.usePin.gu}</Text>
+              </Pressable>
             </View>
-
-            {!result ? (
-              <>
-                <Text style={styles.prompt}>{L.lookAtCamera.en}</Text>
-                <Text style={styles.promptGu}>{L.lookAtCamera.gu}</Text>
-                <Pressable
-                  style={[styles.scanBtn, scanning && { opacity: 0.5 }]}
-                  onPress={scan}
-                  disabled={scanning}
-                >
-                  <Text style={styles.scanEmoji}>{scanning ? '…' : '😀'}</Text>
-                  <Text style={styles.scanText}>{L.scanFace.en}</Text>
-                  <Text style={styles.scanTextGu}>{L.scanFace.gu}</Text>
-                </Pressable>
-              </>
-            ) : result.verdict === 'unknown' ? (
-              <>
-                <Text style={styles.prompt}>Not recognised</Text>
-                <Text style={styles.help}>Try again in better light, or use your PIN.</Text>
-                <Pressable style={styles.retryBtn} onPress={() => setResult(null)}>
-                  <Text style={styles.retryText}>{L.tryAgain.en} / {L.tryAgain.gu}</Text>
-                </Pressable>
-              </>
-            ) : (
-              <>
-                <Text style={styles.matchName}>{result.match.name}</Text>
-                <Text style={styles.help}>
-                  {result.verdict === 'confident' ? 'Tap IN or OUT' : 'Is this you? Tap IN or OUT'}
-                </Text>
-                <View style={styles.btnRow}>
-                  <Pressable
-                    style={[styles.bigBtn, { backgroundColor: colors.healthy }, busy && { opacity: 0.5 }]}
-                    onPress={() => punch(result.match.id, 'in', result.match.name)}
-                    disabled={busy}
-                  >
-                    <Text style={styles.bigEmoji}>🟢</Text>
-                    <Text style={styles.bigEn}>{L.punchIn.en}</Text>
-                    <Text style={styles.bigGu}>{L.punchIn.gu}</Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.bigBtn, { backgroundColor: colors.accent }, busy && { opacity: 0.5 }]}
-                    onPress={() => punch(result.match.id, 'out', result.match.name)}
-                    disabled={busy}
-                  >
-                    <Text style={styles.bigEmoji}>🔴</Text>
-                    <Text style={styles.bigEn}>{L.punchOut.en}</Text>
-                    <Text style={styles.bigGu}>{L.punchOut.gu}</Text>
-                  </Pressable>
-                </View>
-                <Pressable style={styles.retryBtn} onPress={() => setResult(null)}>
-                  <Text style={styles.retryText}>{L.notYou.en} / {L.notYou.gu}</Text>
-                </Pressable>
-              </>
-            )}
-
-            {busy && <ActivityIndicator style={{ marginTop: spacing.lg }} color={colors.primary} />}
-
-            <Pressable style={styles.pinLink} onPress={() => router.back()}>
-              <Text style={styles.pinLinkText}>{L.usePin.en} / {L.usePin.gu}</Text>
-            </Pressable>
           </>
         )}
-      </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
 
-function timeNow() {
-  const d = new Date();
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+function Center({ children }) {
+  return <SafeAreaView style={styles.center}>{children}</SafeAreaView>;
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: colors.primary, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.md, backgroundColor: colors.bg },
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: colors.primary, paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
+  },
   back: { color: colors.white, fontSize: 30, fontWeight: '700' },
-  headerTitle: { color: colors.white, fontSize: 18, fontWeight: '800' },
+  headerTitle: { color: colors.white, fontSize: 20, fontWeight: '800' },
 
-  centre: { alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xl },
-  big: { fontSize: 56, marginBottom: spacing.md },
-  help: { fontSize: 14, fontWeight: '600', color: colors.textMuted, textAlign: 'center', marginBottom: spacing.md },
+  cameraWrap: { flex: 1, margin: spacing.lg, borderRadius: radius.xl, overflow: 'hidden', backgroundColor: '#000' },
+  camera: { flex: 1 },
+  oval: {
+    position: 'absolute', top: '12%', left: '15%', right: '15%', bottom: '12%',
+    borderWidth: 4, borderColor: '#ffffff88', borderRadius: 999,
+  },
 
-  cameraWrap: { height: 300, borderRadius: radius.lg, overflow: 'hidden', backgroundColor: '#000', ...shadow.card },
-  oval: { position: 'absolute', alignSelf: 'center', top: 20, width: 190, height: 250, borderRadius: 125, borderWidth: 4, borderColor: colors.white, opacity: 0.7 },
+  statusWrap: { alignItems: 'center', paddingHorizontal: spacing.xl, paddingBottom: spacing.xl, gap: 6 },
+  lookTxt: { fontSize: 22, fontWeight: '900', color: colors.text, marginTop: spacing.sm },
+  lookGu: { fontSize: 18, fontWeight: '700', color: colors.textMuted },
+  tryTxt: { fontSize: 14, color: colors.textMuted, marginTop: 4, textAlign: 'center' },
 
-  prompt: { fontSize: 20, fontWeight: '900', color: colors.text, textAlign: 'center', marginTop: spacing.lg },
-  promptGu: { fontSize: 16, fontWeight: '700', color: colors.textMuted, textAlign: 'center', marginBottom: spacing.md },
+  failEmoji: { fontSize: 54 },
+  failTxt: { fontSize: 17, fontWeight: '700', color: colors.text, textAlign: 'center', marginBottom: spacing.sm },
+  btnRow: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm },
+  retryBtn: { flex: 1, backgroundColor: colors.primary, borderRadius: radius.lg, paddingVertical: spacing.lg, alignItems: 'center', ...shadow.card },
+  retryTxt: { color: colors.white, fontSize: 16, fontWeight: '900' },
+  pinBtn: { flex: 1, backgroundColor: colors.surfaceAlt, borderRadius: radius.lg, paddingVertical: spacing.lg, alignItems: 'center' },
+  pinTxt: { color: colors.textMuted, fontSize: 16, fontWeight: '800' },
 
-  scanBtn: { backgroundColor: colors.primary, borderRadius: radius.lg, alignItems: 'center', paddingVertical: spacing.lg, marginTop: spacing.sm, ...shadow.card },
-  scanEmoji: { fontSize: 36 },
-  scanText: { color: colors.white, fontSize: 20, fontWeight: '900' },
-  scanTextGu: { color: colors.white, fontSize: 15, fontWeight: '700' },
+  bigEmoji: { fontSize: 54 },
+  msg: { fontSize: 17, color: colors.text, textAlign: 'center' },
+  primaryBtn: { backgroundColor: colors.primary, borderRadius: radius.lg, paddingVertical: spacing.lg, paddingHorizontal: spacing.xl },
+  primaryBtnTxt: { color: colors.white, fontSize: 17, fontWeight: '900' },
+  linkBtn: { paddingVertical: spacing.md },
+  linkTxt: { color: colors.textMuted, fontSize: 16, fontWeight: '700' },
 
-  matchName: { fontSize: 30, fontWeight: '900', color: colors.text, textAlign: 'center', marginTop: spacing.lg },
-
-  btnRow: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.md },
-  bigBtn: { flex: 1, borderRadius: radius.lg, alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xl, ...shadow.card },
-  bigEmoji: { fontSize: 40 },
-  bigEn: { color: colors.white, fontSize: 24, fontWeight: '900', marginTop: 4 },
-  bigGu: { color: colors.white, fontSize: 16, fontWeight: '700' },
-
-  retryBtn: { alignItems: 'center', paddingVertical: spacing.md, marginTop: spacing.sm },
-  retryText: { color: colors.primary, fontSize: 16, fontWeight: '800' },
-
-  primaryBtn: { backgroundColor: colors.primary, borderRadius: radius.lg, paddingHorizontal: spacing.xl, paddingVertical: spacing.lg },
-  primaryBtnText: { color: colors.white, fontSize: 17, fontWeight: '900' },
-
-  pinLink: { alignItems: 'center', paddingVertical: spacing.lg, marginTop: spacing.sm },
-  pinLinkText: { color: colors.textMuted, fontSize: 17, fontWeight: '800', textDecorationLine: 'underline' },
+  doneWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: 4 },
+  doneEmoji: { fontSize: 78 },
+  doneName: { fontSize: 34, fontWeight: '900', color: colors.white },
+  doneAction: { fontSize: 22, fontWeight: '800', color: '#ffffffdd' },
+  doneTime: { fontSize: 20, color: '#ffffffcc', marginTop: 4 },
+  doneWarn: {
+    fontSize: 14, color: colors.white, backgroundColor: '#00000033',
+    padding: spacing.sm, borderRadius: radius.md, marginTop: spacing.md, textAlign: 'center',
+  },
+  doneBtn: {
+    marginTop: spacing.xl, backgroundColor: '#ffffff', borderRadius: radius.lg,
+    paddingVertical: spacing.lg, paddingHorizontal: spacing.xl * 2,
+  },
+  doneBtnTxt: { fontSize: 18, fontWeight: '900', color: colors.text },
 });
