@@ -77,16 +77,16 @@ const styles = StyleSheet.create({
   headerTitle: { color: colors.white, fontSize: 20, fontWeight: '800' },
 
   todayCard: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.md, ...shadow.card },
-  todayLabel: { fontSize: 14, color: colors.textMuted, fontWeight: '700' },
+  todayLabel: { fontSize: 18, color: colors.textMuted, fontWeight: '700' },
   todayTotal: { fontSize: 36, fontWeight: '900', color: colors.text },
   todayRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
   chip: { flex: 1, backgroundColor: colors.surfaceAlt, borderRadius: radius.md, padding: spacing.sm, alignItems: 'center' },
-  chipLabel: { fontSize: 12, color: colors.textMuted, fontWeight: '700' },
-  chipValue: { fontSize: 16, color: colors.text, fontWeight: '800' },
+  chipLabel: { fontSize: 18, color: colors.textMuted, fontWeight: '700' },
+  chipValue: { fontSize: 20, color: colors.text, fontWeight: '800' },
 
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
   tile: { flexGrow: 1, flexBasis: '46%', backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, minHeight: 130, justifyContent: 'center', ...shadow.card },
   tileEmoji: { fontSize: 34 },
-  tileTitle: { fontSize: 18, fontWeight: '800', color: colors.text, marginTop: spacing.sm },
-  tileSub: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  tileTitle: { fontSize: 20, fontWeight: '800', color: colors.text, marginTop: spacing.sm },
+  tileSub: { fontSize: 18, color: colors.textMuted, marginTop: 2 },
 });

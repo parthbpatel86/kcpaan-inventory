@@ -360,7 +360,7 @@ const styles = StyleSheet.create({
   },
   back: { color: colors.white, fontSize: 30, fontWeight: '700' },
   headerTitle: { color: colors.white, fontSize: 20, fontWeight: '800' },
-  muted: { color: colors.textMuted, fontSize: 14, paddingHorizontal: spacing.sm },
+  muted: { color: colors.textMuted, fontSize: 18, paddingHorizontal: spacing.sm },
 
   tabBar: { flexGrow: 0, backgroundColor: colors.surface },
   tabBarInner: { padding: spacing.sm, gap: spacing.sm },
@@ -369,7 +369,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceAlt,
   },
   tabOn: { backgroundColor: colors.primary },
-  tabText: { fontWeight: '800', color: colors.textMuted, fontSize: 15 },
+  tabText: { fontWeight: '800', color: colors.textMuted, fontSize: 19 },
   tabTextOn: { color: colors.white },
 
   periodBar: {
@@ -383,13 +383,13 @@ const styles = StyleSheet.create({
   stepBtnOff: { opacity: 0.35 },
   stepText: { fontSize: 22, fontWeight: '800', color: colors.text, lineHeight: 24 },
   stepTextOff: { color: colors.textLight },
-  monthLabel: { flex: 1, fontSize: 15, fontWeight: '800', color: colors.text },
+  monthLabel: { flex: 1, fontSize: 19, fontWeight: '800', color: colors.text },
   halfBtn: {
     paddingHorizontal: spacing.md, paddingVertical: 8, borderRadius: radius.md,
     backgroundColor: colors.surfaceAlt,
   },
   halfBtnOn: { backgroundColor: colors.primary },
-  halfText: { fontWeight: '800', color: colors.textMuted, fontSize: 13 },
+  halfText: { fontWeight: '800', color: colors.textMuted, fontSize: 18 },
   halfTextOn: { color: colors.white },
 
   totalCard: {
@@ -397,40 +397,40 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.md, marginBottom: spacing.sm, padding: spacing.md,
     backgroundColor: colors.surface, borderRadius: radius.lg, ...shadow.card,
   },
-  totalName: { fontSize: 17, fontWeight: '800', color: colors.text },
+  totalName: { fontSize: 20, fontWeight: '800', color: colors.text },
   totalValue: { fontSize: 26, fontWeight: '900', color: colors.primary },
 
   tableHead: { flexDirection: 'row', paddingHorizontal: spacing.md, paddingBottom: 6 },
-  th: { fontSize: 12, fontWeight: '800', color: colors.textMuted },
+  th: { fontSize: 18, fontWeight: '800', color: colors.textMuted },
   tr: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface,
     borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.md,
     marginBottom: spacing.sm, ...shadow.card,
   },
   trFlagged: { borderLeftWidth: 5, borderLeftColor: colors.order },
-  td: { fontSize: 15, color: colors.text },
+  td: { fontSize: 19, color: colors.text },
   empty: { color: colors.textMuted, textAlign: 'center', marginTop: spacing.xl },
   fixHint: {
-    fontSize: 13, color: colors.order, fontWeight: '700',
+    fontSize: 18, color: colors.order, fontWeight: '700',
     textAlign: 'center', marginTop: spacing.sm,
   },
 
   modalBg: { flex: 1, backgroundColor: '#000000aa', justifyContent: 'center', padding: spacing.lg },
   sheet: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, gap: spacing.sm },
   sheetTitle: { fontSize: 20, fontWeight: '900', color: colors.text },
-  sheetFlag: { fontSize: 14, color: colors.order, fontWeight: '700' },
-  pickLabel: { fontSize: 13, fontWeight: '800', color: colors.textMuted, marginTop: spacing.sm },
+  sheetFlag: { fontSize: 18, color: colors.order, fontWeight: '700' },
+  pickLabel: { fontSize: 18, fontWeight: '800', color: colors.textMuted, marginTop: spacing.sm },
   pickRow: { flexDirection: 'row', gap: spacing.sm },
   pickBtn: {
     flex: 1, borderWidth: 2, borderColor: colors.border, borderRadius: radius.md,
     paddingVertical: spacing.md, alignItems: 'center',
   },
-  pickBtnText: { fontSize: 16, fontWeight: '800', color: colors.text },
+  pickBtnText: { fontSize: 20, fontWeight: '800', color: colors.text },
   previewHours: {
-    fontSize: 16, fontWeight: '800', color: colors.primary,
+    fontSize: 20, fontWeight: '800', color: colors.primary,
     textAlign: 'center', marginTop: spacing.sm,
   },
-  note: { fontSize: 12, color: colors.textMuted, fontStyle: 'italic', marginTop: 4 },
+  note: { fontSize: 18, color: colors.textMuted, fontStyle: 'italic', marginTop: 4 },
   cancel: {
     flex: 1, padding: spacing.md, borderRadius: radius.md,
     backgroundColor: colors.surfaceAlt, alignItems: 'center',

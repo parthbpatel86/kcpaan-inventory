@@ -18,8 +18,12 @@ export const colors = {
   surfaceAlt: '#F0F2EF',
   border: '#E2E6E1',
   text: '#1C2620',
-  textMuted: '#6B7770',
-  textLight: '#9AA59E',
+  // 7:1 on white (WCAG AAA). Was #6B7770 at 4.67:1 — readable for me, not
+  // for a 60-year-old in a bright shop.
+  textMuted: '#42504A',
+  // Was #9AA59E at 2.55:1 — effectively invisible to ageing eyes, and it was
+  // being used for placeholder and hint text, the content people most need.
+  textLight: '#4E5A54',
 
   // Payment chips — one distinct colour per payment button so staff can pick
   // by colour + icon without reading the label.
@@ -50,4 +54,26 @@ export const shadow = {
     shadowRadius: 8,
     elevation: 3,
   },
+};
+
+// Type scale for older users.
+//
+// Research on seniors and touchscreens puts the body-text floor at 20pt and
+// recommends bold (700+) throughout, because thin small type is the single
+// biggest obstacle for ageing eyes. The smallest step here is 18 — there is
+// deliberately no 12 or 14, so nothing can drift back down.
+export const type = {
+  tiny: 18,     // the absolute floor; use sparingly
+  body: 20,     // default for anything a person must read
+  label: 22,
+  title: 26,
+  big: 32,      // prices, totals, names
+  huge: 44,     // the number that matters most on the screen
+};
+
+// Touch targets. Google says 48dp minimum; we use 56 because staff will be
+// hurrying, and paan counter hands are often wet or sticky.
+export const touch = {
+  min: 56,
+  gap: 16,
 };

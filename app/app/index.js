@@ -147,8 +147,8 @@ const styles = StyleSheet.create({
 
   topBar: { flexDirection: 'row', alignItems: 'center' },
   mgrBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.xl },
-  mgrEmoji: { fontSize: 18 },
-  mgrTxt: { color: colors.white, fontWeight: '800', fontSize: 14 },
+  mgrEmoji: { fontSize: 20 },
+  mgrTxt: { color: colors.white, fontWeight: '800', fontSize: 18 },
 
   header: { alignItems: 'center', marginTop: spacing.lg, marginBottom: spacing.xl },
   brand: { color: colors.white, fontSize: 44, fontWeight: '900' },
@@ -157,17 +157,17 @@ const styles = StyleSheet.create({
   clockTile: { backgroundColor: colors.gold },
   primaryEmoji: { fontSize: 44 },
   primaryTitle: { fontSize: 26, fontWeight: '900', color: colors.text },
-  primarySub: { fontSize: 14, color: colors.textMuted, marginTop: 2 },
+  primarySub: { fontSize: 18, color: colors.textMuted, marginTop: 2 },
   chev: { fontSize: 34, color: colors.textLight },
 
   onClockCard: { backgroundColor: 'rgba(255,255,255,0.16)', borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.lg },
-  onClockLabel: { color: colors.white, fontSize: 13, fontWeight: '800', marginBottom: spacing.sm, opacity: 0.9 },
+  onClockLabel: { color: colors.white, fontSize: 18, fontWeight: '800', marginBottom: spacing.sm, opacity: 0.9 },
   onClockNames: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   onClockChip: { backgroundColor: colors.white, borderRadius: 999, paddingHorizontal: spacing.md, paddingVertical: 6 },
-  onClockName: { color: colors.primaryDark, fontSize: 16, fontWeight: '900' },
+  onClockName: { color: colors.primaryDark, fontSize: 20, fontWeight: '900' },
   alertCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.order, borderRadius: radius.lg, padding: spacing.lg },
   alertNum: { color: colors.white, fontSize: 32, fontWeight: '900' },
-  alertTxt: { color: colors.white, fontSize: 15, fontWeight: '700' },
+  alertTxt: { color: colors.white, fontSize: 19, fontWeight: '700' },
 
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
   modalCard: { width: '100%', backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.xl },
@@ -175,7 +175,7 @@ const styles = StyleSheet.create({
   modalInput: { borderWidth: 2, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md, fontSize: 30, letterSpacing: 8, marginTop: spacing.lg, color: colors.text },
   modalBtns: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.lg },
   modalCancel: { flex: 1, paddingVertical: spacing.md, borderRadius: radius.md, backgroundColor: colors.surfaceAlt, alignItems: 'center' },
-  modalCancelTxt: { fontSize: 16, fontWeight: '800', color: colors.textMuted },
+  modalCancelTxt: { fontSize: 20, fontWeight: '800', color: colors.textMuted },
   modalOk: { flex: 1, paddingVertical: spacing.md, borderRadius: radius.md, backgroundColor: colors.primary, alignItems: 'center' },
-  modalOkTxt: { fontSize: 16, fontWeight: '800', color: colors.white },
+  modalOkTxt: { fontSize: 20, fontWeight: '800', color: colors.white },
 });

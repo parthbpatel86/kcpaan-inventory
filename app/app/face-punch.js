@@ -252,23 +252,23 @@ const styles = StyleSheet.create({
 
   statusWrap: { alignItems: 'center', paddingHorizontal: spacing.xl, paddingBottom: spacing.xl, gap: 6 },
   lookTxt: { fontSize: 22, fontWeight: '900', color: colors.text, marginTop: spacing.sm },
-  lookGu: { fontSize: 18, fontWeight: '700', color: colors.textMuted },
-  tryTxt: { fontSize: 14, color: colors.textMuted, marginTop: 4, textAlign: 'center' },
+  lookGu: { fontSize: 20, fontWeight: '700', color: colors.textMuted },
+  tryTxt: { fontSize: 18, color: colors.textMuted, marginTop: 4, textAlign: 'center' },
 
   failEmoji: { fontSize: 54 },
-  failTxt: { fontSize: 17, fontWeight: '700', color: colors.text, textAlign: 'center', marginBottom: spacing.sm },
+  failTxt: { fontSize: 20, fontWeight: '700', color: colors.text, textAlign: 'center', marginBottom: spacing.sm },
   btnRow: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm },
   retryBtn: { flex: 1, backgroundColor: colors.primary, borderRadius: radius.lg, paddingVertical: spacing.lg, alignItems: 'center', ...shadow.card },
-  retryTxt: { color: colors.white, fontSize: 16, fontWeight: '900' },
+  retryTxt: { color: colors.white, fontSize: 20, fontWeight: '900' },
   pinBtn: { flex: 1, backgroundColor: colors.surfaceAlt, borderRadius: radius.lg, paddingVertical: spacing.lg, alignItems: 'center' },
-  pinTxt: { color: colors.textMuted, fontSize: 16, fontWeight: '800' },
+  pinTxt: { color: colors.textMuted, fontSize: 20, fontWeight: '800' },
 
   bigEmoji: { fontSize: 54 },
-  msg: { fontSize: 17, color: colors.text, textAlign: 'center' },
+  msg: { fontSize: 20, color: colors.text, textAlign: 'center' },
   primaryBtn: { backgroundColor: colors.primary, borderRadius: radius.lg, paddingVertical: spacing.lg, paddingHorizontal: spacing.xl },
-  primaryBtnTxt: { color: colors.white, fontSize: 17, fontWeight: '900' },
+  primaryBtnTxt: { color: colors.white, fontSize: 20, fontWeight: '900' },
   linkBtn: { paddingVertical: spacing.md },
-  linkTxt: { color: colors.textMuted, fontSize: 16, fontWeight: '700' },
+  linkTxt: { color: colors.textMuted, fontSize: 20, fontWeight: '700' },
 
   doneWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: 4 },
   doneEmoji: { fontSize: 78 },
@@ -276,12 +276,12 @@ const styles = StyleSheet.create({
   doneAction: { fontSize: 22, fontWeight: '800', color: '#ffffffdd' },
   doneTime: { fontSize: 20, color: '#ffffffcc', marginTop: 4 },
   doneWarn: {
-    fontSize: 14, color: colors.white, backgroundColor: '#00000033',
+    fontSize: 18, color: colors.white, backgroundColor: '#00000033',
     padding: spacing.sm, borderRadius: radius.md, marginTop: spacing.md, textAlign: 'center',
   },
   doneBtn: {
     marginTop: spacing.xl, backgroundColor: '#ffffff', borderRadius: radius.lg,
     paddingVertical: spacing.lg, paddingHorizontal: spacing.xl * 2,
   },
-  doneBtnTxt: { fontSize: 18, fontWeight: '900', color: colors.text },
+  doneBtnTxt: { fontSize: 20, fontWeight: '900', color: colors.text },
 });

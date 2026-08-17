@@ -205,22 +205,22 @@ const styles = StyleSheet.create({
 
   bottom: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg, alignItems: 'center', gap: 4 },
   poseEmoji: { fontSize: 34 },
-  poseEn: { fontSize: 19, fontWeight: '900', color: colors.text, textAlign: 'center' },
-  poseGu: { fontSize: 16, fontWeight: '700', color: colors.textMuted },
-  hint: { fontSize: 14, color: colors.order, fontWeight: '700', textAlign: 'center', marginTop: 4 },
+  poseEn: { fontSize: 20, fontWeight: '900', color: colors.text, textAlign: 'center' },
+  poseGu: { fontSize: 20, fontWeight: '700', color: colors.textMuted },
+  hint: { fontSize: 18, color: colors.order, fontWeight: '700', textAlign: 'center', marginTop: 4 },
 
   btnRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md, alignSelf: 'stretch' },
   shootBtn: { flex: 1, backgroundColor: colors.primary, borderRadius: radius.lg, paddingVertical: spacing.lg, alignItems: 'center', ...shadow.card },
-  shootTxt: { color: colors.white, fontSize: 16, fontWeight: '900' },
+  shootTxt: { color: colors.white, fontSize: 20, fontWeight: '900' },
   undoBtn: { paddingHorizontal: spacing.lg, justifyContent: 'center', borderRadius: radius.lg, backgroundColor: colors.surfaceAlt },
   undoTxt: { color: colors.textMuted, fontWeight: '800' },
 
   saveBtn: { alignSelf: 'stretch', backgroundColor: colors.healthy, borderRadius: radius.lg, paddingVertical: spacing.lg, alignItems: 'center', marginTop: spacing.sm },
-  saveTxt: { color: colors.white, fontSize: 17, fontWeight: '900' },
-  privacy: { fontSize: 12, color: colors.textMuted, textAlign: 'center', marginTop: spacing.sm },
+  saveTxt: { color: colors.white, fontSize: 20, fontWeight: '900' },
+  privacy: { fontSize: 18, color: colors.textMuted, textAlign: 'center', marginTop: spacing.sm },
 
   bigEmoji: { fontSize: 54 },
-  msg: { fontSize: 17, color: colors.text, textAlign: 'center' },
+  msg: { fontSize: 20, color: colors.text, textAlign: 'center' },
   primaryBtn: { backgroundColor: colors.primary, borderRadius: radius.lg, paddingVertical: spacing.lg, paddingHorizontal: spacing.xl },
-  primaryBtnTxt: { color: colors.white, fontSize: 17, fontWeight: '900' },
+  primaryBtnTxt: { color: colors.white, fontSize: 20, fontWeight: '900' },
 });
