@@ -19,7 +19,9 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { colors, radius, spacing, shadow } from '../src/lib/theme';
 import { api } from '../src/lib/api';
 import { L } from '../src/lib/labels';
-import { embedFromPhoto, identify, reasonText } from '../src/lib/face';
+import {
+  embedFromPhoto, identify, reasonText, MAX_DISTANCE, MIN_SEPARATION,
+} from '../src/lib/face';
 
 const MAX_TRIES = 3;
 
@@ -82,13 +84,22 @@ export default function FacePunch() {
     if (error) return { ok: false, why: reasonText(error) };
 
     const r = identify(vector, enrolled || []);
-    if (!r.match) return { ok: false, why: 'Nobody is enrolled yet' };
-    if (!r.confident) {
-      // Either the score was low, or two people scored too close together.
+    if (r.needsReenrol) {
       return {
         ok: false,
-        why: r.runnerUp
-          ? 'Not sure who that is — too close a match'
+        why: 'Saved faces are from an older version — re-register in Manager → Settings.',
+      };
+    }
+    if (!r.match) return { ok: false, why: 'Nobody is enrolled yet' };
+    if (!r.confident) {
+      // Two different failures, and the difference matters to whoever is
+      // standing there: "I do not know you" vs "you look too much like
+      // someone else to be sure".
+      const tooClose = r.distance <= MAX_DISTANCE && r.separation < MIN_SEPARATION;
+      return {
+        ok: false,
+        why: tooClose
+          ? `Too close a match between ${r.match.name} and ${r.runnerUp?.name || 'someone else'}`
           : 'Face not recognised',
       };
     }

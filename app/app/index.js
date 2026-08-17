@@ -20,9 +20,14 @@ export default function Home() {
   const [pin, setPin] = useState('');
   const [checking, setChecking] = useState(false);
   const [dash, setDash] = useState(null);
+  const [onClock, setOnClock] = useState([]);
 
   const loadDash = useCallback(async () => {
     try { setDash(await api.dashboard()); } catch (e) { /* offline — show nothing */ }
+    try {
+      const staff = await api.listEmployees();
+      setOnClock((staff || []).filter((e) => e.on_clock));
+    } catch (e) { /* offline — show nothing */ }
   }, []);
 
   useFocusEffect(useCallback(() => { loadDash(); }, [loadDash]));
@@ -73,7 +78,7 @@ export default function Home() {
           <Text style={styles.chev}>›</Text>
         </Pressable>
 
-        <Pressable style={[styles.primaryTile, styles.clockTile]} onPress={() => router.push('/punch')}>
+        <Pressable style={[styles.primaryTile, styles.clockTile]} onPress={() => router.push('/face-punch')}>
           <Text style={styles.primaryEmoji}>🕐</Text>
           <View style={{ flex: 1 }}>
             <Text style={styles.primaryTitle}>Time Clock</Text>
@@ -81,6 +86,21 @@ export default function Home() {
           </View>
           <Text style={styles.chev}>›</Text>
         </Pressable>
+
+        {/* Who is on the clock right now. Parth: "On the main screen, show
+            whoever is clocked in as names." */}
+        {onClock.length > 0 && (
+          <View style={styles.onClockCard}>
+            <Text style={styles.onClockLabel}>● Working now</Text>
+            <View style={styles.onClockNames}>
+              {onClock.map((e) => (
+                <View key={e.id} style={styles.onClockChip}>
+                  <Text style={styles.onClockName}>{e.name}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
 
         {/* Reorder alert is operationally useful to staff too */}
         {dash?.reorder_count > 0 && (
@@ -140,6 +160,11 @@ const styles = StyleSheet.create({
   primarySub: { fontSize: 14, color: colors.textMuted, marginTop: 2 },
   chev: { fontSize: 34, color: colors.textLight },
 
+  onClockCard: { backgroundColor: 'rgba(255,255,255,0.16)', borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.lg },
+  onClockLabel: { color: colors.white, fontSize: 13, fontWeight: '800', marginBottom: spacing.sm, opacity: 0.9 },
+  onClockNames: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  onClockChip: { backgroundColor: colors.white, borderRadius: 999, paddingHorizontal: spacing.md, paddingVertical: 6 },
+  onClockName: { color: colors.primaryDark, fontSize: 16, fontWeight: '900' },
   alertCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.order, borderRadius: radius.lg, padding: spacing.lg },
   alertNum: { color: colors.white, fontSize: 32, fontWeight: '900' },
   alertTxt: { color: colors.white, fontSize: 15, fontWeight: '700' },

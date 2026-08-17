@@ -29,7 +29,10 @@ const REQUIRED = [
 /** Extra landmarks that improve accuracy when present. */
 const OPTIONAL = ['leftEar', 'rightEar', 'leftCheek', 'rightCheek', 'mouthBottom'];
 
-export const SIGNATURE_VERSION = 2;   // bump when the maths changes
+export const SIGNATURE_VERSION = 3;   // bump when the maths changes
+
+/** Length a v3 signature must have. Anything else is an older enrolment. */
+export const SIGNATURE_DIMS = 12 + 12 + 4 + 4 + 4 + 4 + 3;   // = 43
 
 function dist(a, b) {
   const dx = a.x - b.x;
@@ -105,7 +108,41 @@ export function signatureFromFace(face) {
     v.push(0);
   }
 
+  // ---- CONTOURS -------------------------------------------------------
+  // Ten landmark points describe where features ARE. Contours describe their
+  // SHAPE: the outline of the jaw, the arc of each eyebrow, the curve of the
+  // lips — around 130 points instead of 10. Two people with similar landmark
+  // spacing usually still have visibly different jaw and brow shapes, so this
+  // is where most of the discriminating power lives.
+  const co = face.contours || {};
+  v.push(...contourShape(co.face, eyeMid, eyeGap, 12));
+  v.push(...contourShape(co.leftEyebrowTop, eyeMid, eyeGap, 4));
+  v.push(...contourShape(co.rightEyebrowTop, eyeMid, eyeGap, 4));
+  v.push(...contourShape(co.upperLipTop, eyeMid, eyeGap, 4));
+  v.push(...contourShape(co.lowerLipBottom, eyeMid, eyeGap, 4));
+  v.push(...contourShape(co.noseBridge, eyeMid, eyeGap, 3));
+
   return v;
+}
+
+/**
+ * Reduce one contour to a fixed number of scale-invariant measurements.
+ *
+ * We resample the contour to `n` evenly spaced points and record each one's
+ * distance from the eye midpoint, divided by the eye gap. Fixed length matters:
+ * ML Kit returns a different number of raw points per photo, and signatures can
+ * only be compared if they are the same length every time.
+ */
+function contourShape(contour, origin, scale, n) {
+  const out = new Array(n).fill(0);
+  const pts = contour && contour.points;
+  if (!pts || pts.length < 2 || !scale) return out;
+  for (let i = 0; i < n; i++) {
+    const idx = Math.round((i * (pts.length - 1)) / (n - 1));
+    const p = pts[idx];
+    if (p) out[i] = dist(origin, p) / scale;
+  }
+  return out;
 }
 
 /** Detect the most prominent face in a photo and return its signature. */
@@ -113,6 +150,9 @@ export async function embedFromPhoto(uri) {
   const faces = await FaceDetection.detect(uri, {
     performanceMode: 'accurate',
     landmarkMode: 'all',
+    // Contours are the big win: ~130 points describing the SHAPE of the jaw,
+    // brows and lips, not just where the eyes and nose sit.
+    contourMode: 'all',
     classificationMode: 'all',
     minFaceSize: 0.15,
   });
@@ -145,49 +185,84 @@ export function cosine(a, b) {
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
-// Matching thresholds.
+// Matching.
 //
-// With ~10 staff the job is to tell ten people apart, not to find one face in
-// a million — a far easier problem. Two rules must BOTH hold:
+// Cosine similarity was the wrong tool here. Every human face has roughly the
+// same proportions, so all the vectors point in nearly the same direction and
+// genuine vs impostor scores landed 0.9996 vs 0.9990 — a gap of 0.0005, far too
+// small to act on. Measured on real enrolments, not guessed.
 //
-//   1. the best match must clear MIN_SCORE, and
-//   2. it must beat the runner-up by MIN_MARGIN.
-//
-// Rule 2 is the important one. If two staff score 0.97 and 0.96 the top score
-// looks excellent but the app has not actually distinguished them, and
-// guessing would put the wrong person's hours on the payroll. In that case we
-// say we are unsure and let them tap a name.
-export const MIN_SCORE = 0.90;
-export const MIN_MARGIN = 0.03;
+// Instead we compare each measurement against how much THAT measurement varies
+// between people, then take a normalised distance. A dimension where everyone
+// is alike contributes little; one where people differ contributes a lot.
+export const MAX_DISTANCE = 0.55;   // best match must be at least this close
+export const MIN_SEPARATION = 0.20; // and this much closer than the runner-up
+
+/** Per-dimension spread across all enrolled staff — our yardstick. */
+function spreads(enrolled) {
+  const all = [];
+  for (const p of enrolled || []) for (const v of p.vectors || []) all.push(v);
+  if (all.length < 2) return null;
+  const n = all[0].length;
+  const out = new Array(n).fill(1);
+  for (let i = 0; i < n; i++) {
+    let sum = 0;
+    for (const v of all) sum += v[i] || 0;
+    const mean = sum / all.length;
+    let varr = 0;
+    for (const v of all) varr += ((v[i] || 0) - mean) ** 2;
+    // Floor stops a dimension everyone shares from dividing by ~0 and
+    // exploding into noise.
+    out[i] = Math.max(Math.sqrt(varr / all.length), 1e-3);
+  }
+  return out;
+}
+
+/** Distance in "how unusual is this difference" units. Lower = more alike. */
+export function normDistance(a, b, sd) {
+  if (!a || !b || a.length !== b.length) return Infinity;
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) {
+    const d = ((a[i] || 0) - (b[i] || 0)) / (sd ? sd[i] : 1);
+    sum += d * d;
+  }
+  return Math.sqrt(sum / a.length);
+}
 
 /**
  * Compare a probe signature against enrolled staff.
  *
  * enrolled: [{ id, name, vectors: [[...], ...] }]
- * Returns { match, score, margin, runnerUp, confident }.
+ * Returns { match, distance, separation, runnerUp, confident }.
  */
 export function identify(probe, enrolled) {
-  const scored = [];
-  for (const person of enrolled || []) {
-    let best = -1;
-    for (const v of person.vectors || []) {
-      const s = cosine(probe, v);
-      if (s > best) best = s;
-    }
-    if (best > -1) scored.push({ person, score: best });
-  }
-  if (scored.length === 0) return { match: null, score: 0, margin: 0, confident: false };
+  // Only compare against enrolments of the SAME shape. A stale signature from
+  // an older app version silently made every comparison fail, which looked
+  // like "face recognition is broken" rather than "one person needs re-enrolling".
+  const usable = (enrolled || [])
+    .map((p) => ({ ...p, vectors: (p.vectors || []).filter((v) => v.length === probe.length) }))
+    .filter((p) => p.vectors.length > 0);
 
-  scored.sort((a, b) => b.score - a.score);
+  if (usable.length === 0) {
+    return { match: null, distance: Infinity, separation: 0, confident: false, needsReenrol: true };
+  }
+
+  const sd = spreads(usable);
+  const scored = usable.map((person) => ({
+    person,
+    distance: Math.min(...person.vectors.map((v) => normDistance(probe, v, sd))),
+  }));
+  scored.sort((a, b) => a.distance - b.distance);
+
   const top = scored[0];
   const second = scored[1];
-  const margin = second ? top.score - second.score : 1;
-  const confident = top.score >= MIN_SCORE && margin >= MIN_MARGIN;
+  const separation = second ? second.distance - top.distance : Infinity;
+  const confident = top.distance <= MAX_DISTANCE && separation >= MIN_SEPARATION;
 
   return {
     match: top.person,
-    score: top.score,
-    margin,
+    distance: top.distance,
+    separation,
     runnerUp: second ? second.person : null,
     confident,
   };
