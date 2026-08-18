@@ -34,6 +34,16 @@ def _shop_today():
     return datetime.now(ZoneInfo(SHOP_TZ)).strftime("%Y-%m-%d")
 
 
+def _iso_day(v):
+    """A grouped day as 'YYYY-MM-DD'.
+
+    Postgres returns a real date object for date(...), which Flask serializes as
+    'Fri, 14 Aug 2026 00:00:00 GMT'; SQLite returns the string already. Clients
+    slice these to build chart labels, so the format has to be stable.
+    """
+    return v.isoformat() if hasattr(v, "isoformat") else str(v)
+
+
 def _get_pin(conn):
     """PIN lives in the settings table (seeded by init_db); env is a fallback."""
     row = conn.execute("SELECT value FROM settings WHERE key = 'stock_pin'").fetchone()
@@ -83,7 +93,7 @@ def _resolve_discount(conn, d, subtotal):
         pct = _setting(conn, "employee_discount_pct", 8)
         return round(subtotal * pct / 100.0, 2)
 
-    cap = round(subtotal * _setting(conn, "max_discount_pct", 10) / 100.0, 2)
+    cap = round(subtotal * _setting(conn, "max_discount_pct", 8) / 100.0, 2)
     if d.get("discount_pct") is not None:
         try:
             pct = max(0.0, float(d.get("discount_pct") or 0))
@@ -515,7 +525,7 @@ def reports():
         "count": totals["cnt"],
         "discount": round(totals["discount"], 2),
         "by_type": {r["payment_type"]: {"count": r["cnt"], "total": round(r["total"], 2)} for r in by_type},
-        "by_day": [{"day": r["day"], "count": r["cnt"], "total": round(r["total"], 2)} for r in by_day],
+        "by_day": [{"day": _iso_day(r["day"]), "count": r["cnt"], "total": round(r["total"], 2)} for r in by_day],
         "top_items": [{"name": r["name"], "qty": r["qty"], "revenue": round(r["revenue"], 2)} for r in top_items],
     })
 

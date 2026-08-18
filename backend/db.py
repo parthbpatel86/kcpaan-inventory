@@ -303,7 +303,7 @@ CREATE INDEX IF NOT EXISTS idx_sales_created ON sales(created_at);
 
 DEFAULT_SETTINGS = {
     "employee_discount_pct": "8",   # EMPLOYEE button discount
-    "max_discount_pct": "10",       # cap on the manual discount (% of cart)
+    "max_discount_pct": "8",        # cap on the manual discount (% of cart)
     "punch_max_hours": "14",        # open punch older than this is flagged
 }
 
