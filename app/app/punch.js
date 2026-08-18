@@ -5,7 +5,7 @@
 // authenticated", it cannot say WHICH employee. A USB/Bluetooth fingerprint
 // reader would call this same endpoint and nothing else would change.
 import { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, TextInput, Alert, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Pressable, TextInput, Alert, ActivityIndicator, ScrollView, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { colors, radius, spacing, shadow } from '../src/lib/theme';
@@ -28,27 +28,40 @@ export default function Punch() {
 
   useEffect(() => { load(); }, []);
 
-  async function doPunch() {
+  // Parth: "no need to tap on name, then edit pin, and then in/out." The PIN
+  // sheet opens the moment a name is tapped and fires as soon as the 4th digit
+  // lands, so the whole clock-in is: tap name, type PIN. The server decides IN
+  // vs OUT, so nobody is ever asked to choose.
+  async function doPunch(person, code) {
     // Identity comes from the SELECTED person, not from the PIN alone. If two
     // people ever shared a PIN, a PIN-only punch could clock in the wrong one.
-    if (!selected || !pin.trim() || busy) return;
+    if (!person || !code || busy) return;
     setBusy(true);
     try {
-      const res = await api.punch(pin.trim(), undefined, selected.id);
+      const res = await api.punch(code, undefined, person.id);
       const verb = res.action === 'in' ? 'Punched IN' : 'Punched OUT';
-      Alert.alert(`${verb} — ${res.employee}`, res.warning ? `⚠️ ${res.warning}` : timeNow());
-      setPin('');
       setSelected(null);
+      setPin('');
+      Alert.alert(`${verb} — ${res.employee}`, res.warning ? `⚠️ ${res.warning}` : timeNow());
       load();
     } catch (e) {
       const msg = String(e.message || e);
+      setPin('');
       Alert.alert(
         'Not recognised',
-        /404/.test(msg) ? `That PIN is not correct for ${selected.name}.` : msg,
+        /404/.test(msg) ? `That PIN is not correct for ${person.name}.` : msg,
       );
     } finally {
       setBusy(false);
     }
+  }
+
+  function onPinChange(person, value) {
+    const code = value.replace(/\D/g, '').slice(0, 4);
+    setPin(code);
+    // PINs are exactly 4 digits (enforced when staff are created), so the 4th
+    // digit is an unambiguous "go" — no extra button to find and press.
+    if (code.length === 4) doPunch(person, code);
   }
 
   return (
@@ -64,34 +77,8 @@ export default function Punch() {
           <ActivityIndicator color={colors.primary} />
         ) : (
           <>
-            <Text style={styles.sectionTitle}>1 · Tap your name</Text>
-            <View style={styles.staffRow}>
-              {employees.length === 0 && (
-                <Text style={styles.muted}>No staff registered yet — add them in Manager → Settings.</Text>
-              )}
-              {employees.map((e) => {
-                const picked = selected && selected.id === e.id;
-                return (
-                  <Pressable
-                    key={e.id}
-                    style={[
-                      styles.staffChip,
-                      e.on_clock && styles.staffChipOn,
-                      picked && styles.staffChipPicked,
-                    ]}
-                    onPress={() => { setSelected(picked ? null : e); setPin(''); }}
-                  >
-                    <Text style={[styles.staffName, e.on_clock && styles.staffNameOn]}>
-                      {picked ? '✓ ' : ''}{e.name}
-                    </Text>
-                    <Text style={[styles.staffState, e.on_clock && styles.staffNameOn]}>
-                      {e.on_clock ? `● ${L.punchIn.en}` : `○ ${L.punchOut.en}`}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
+            {/* Face is the fast path, so it goes first — Parth: "Move the scan
+                face to the top before 1. Tap your name." */}
             <Pressable style={styles.faceBtn} onPress={() => router.push('/face-punch')}>
               <Text style={styles.faceEmoji}>😀</Text>
               <View>
@@ -99,51 +86,76 @@ export default function Punch() {
                 <Text style={styles.faceGu}>{L.scanFace.gu}</Text>
               </View>
             </Pressable>
+            <Text style={styles.faceHint}>No name, no PIN — just look at the phone.</Text>
 
-            <Text style={styles.sectionTitle}>
-              2 · {selected ? `Enter ${selected.name}'s PIN` : 'Enter your PIN'}
-            </Text>
-            <TextInput
-              style={styles.pinInput}
-              value={pin}
-              onChangeText={setPin}
-              keyboardType="number-pad"
-              secureTextEntry
-              maxLength={6}
-              placeholder="• • • •"
-              placeholderTextColor={colors.textLight}
-              textAlign="center"
-            />
+            <Text style={styles.orTxt}>— or —</Text>
 
-            {/* One button. The server already knows whether this person has an
-                open shift, so asking them to choose IN or OUT is a decision we
-                can make for them. */}
-            <Pressable
-              style={[
-                styles.punchBtn,
-                { backgroundColor: selected && selected.on_clock ? colors.accent : colors.healthy },
-                (!pin || !selected || busy) && { opacity: 0.5 },
-              ]}
-              onPress={() => doPunch()}
-              disabled={!pin || !selected || busy}
-            >
-              <Text style={styles.punchEmoji}>
-                {selected && selected.on_clock ? '🔴' : '🟢'}
-              </Text>
-              <Text style={styles.punchEn}>
-                {selected
-                  ? (selected.on_clock ? `${L.punchOut.en} — ${selected.name}` : `${L.punchIn.en} — ${selected.name}`)
-                  : 'Tap your name first'}
-              </Text>
-              <Text style={styles.punchGu}>
-                {selected ? (selected.on_clock ? L.punchOut.gu : L.punchIn.gu) : ''}
-              </Text>
-            </Pressable>
-
-            {busy && <ActivityIndicator style={{ marginTop: spacing.lg }} color={colors.primary} />}
+            <Text style={styles.sectionTitle}>Tap your name</Text>
+            <View style={styles.staffRow}>
+              {employees.length === 0 && (
+                <Text style={styles.muted}>No staff registered yet — add them in Manager → Settings.</Text>
+              )}
+              {employees.map((e) => (
+                <Pressable
+                  key={e.id}
+                  style={[styles.staffChip, e.on_clock && styles.staffChipOn]}
+                  onPress={() => { setSelected(e); setPin(''); }}
+                >
+                  <Text style={[styles.staffName, e.on_clock && styles.staffNameOn]}>{e.name}</Text>
+                  <Text style={[styles.staffState, e.on_clock && styles.staffNameOn]}>
+                    {e.on_clock ? `● ${L.punchIn.en}` : `○ ${L.punchOut.en}`}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
           </>
         )}
       </ScrollView>
+
+      {/* PIN sheet — opens on the name tap, submits on the 4th digit. The
+          heading states the action the server is about to take, so nobody has
+          to decide between IN and OUT. */}
+      <Modal
+        visible={!!selected}
+        transparent
+        animationType="fade"
+        onRequestClose={() => { setSelected(null); setPin(''); }}
+      >
+        <View style={styles.modalBg}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalName}>{selected?.name}</Text>
+            <Text style={styles.modalAction}>
+              {selected?.on_clock
+                ? `🔴 Punch ${L.punchOut.en} · ${L.punchOut.gu}`
+                : `🟢 Punch ${L.punchIn.en} · ${L.punchIn.gu}`}
+            </Text>
+            <Text style={styles.modalHint}>Enter your 4-digit PIN</Text>
+            <TextInput
+              style={styles.pinInput}
+              value={pin}
+              onChangeText={(v) => onPinChange(selected, v)}
+              keyboardType="number-pad"
+              secureTextEntry
+              maxLength={4}
+              placeholder="• • • •"
+              placeholderTextColor={colors.textLight}
+              textAlign="center"
+              autoFocus
+              editable={!busy}
+            />
+            {busy ? (
+              <ActivityIndicator style={{ marginTop: spacing.md }} color={colors.primary} />
+            ) : (
+              <Pressable
+                style={styles.modalCancel}
+                onPress={() => { setSelected(null); setPin(''); }}
+              >
+                <Text style={styles.modalCancelTxt}>{L.cancel.en}</Text>
+              </Pressable>
+            )}
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -169,14 +181,25 @@ const styles = StyleSheet.create({
   staffNameOn: { color: colors.white },
   staffState: { fontSize: 18, fontWeight: '700', color: colors.textMuted },
 
+  faceHint: { fontSize: 18, color: colors.textMuted, textAlign: 'center', marginTop: spacing.sm },
+  orTxt: { fontSize: 19, fontWeight: '700', color: colors.textLight, textAlign: 'center', marginTop: spacing.lg },
+
+  modalBg: { flex: 1, backgroundColor: '#00000088', alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
+  modalCard: { width: '100%', backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.xl, alignItems: 'center', gap: 4 },
+  modalName: { fontSize: 30, fontWeight: '900', color: colors.text },
+  modalAction: { fontSize: 22, fontWeight: '800', color: colors.textMuted, marginBottom: spacing.sm },
+  modalHint: { fontSize: 19, color: colors.textMuted, marginBottom: spacing.sm },
+  modalCancel: { marginTop: spacing.lg, paddingVertical: spacing.md, paddingHorizontal: spacing.xl },
+  modalCancelTxt: { fontSize: 20, fontWeight: '800', color: colors.textMuted },
+
   punchBtn: { borderRadius: radius.lg, alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xl, marginTop: spacing.xl, ...shadow.card },
   punchEmoji: { fontSize: 44 },
   punchEn: { color: colors.white, fontSize: 22, fontWeight: '900', marginTop: 4, textAlign: 'center' },
   punchGu: { color: colors.white, fontSize: 20, fontWeight: '700' },
-  pinInput: { backgroundColor: colors.surface, borderWidth: 2, borderColor: colors.border, borderRadius: radius.md, fontSize: 34, letterSpacing: 10, paddingVertical: spacing.md, color: colors.text },
+  pinInput: { alignSelf: 'stretch', backgroundColor: colors.bg, borderWidth: 2, borderColor: colors.border, borderRadius: radius.md, fontSize: 34, letterSpacing: 10, paddingVertical: spacing.md, color: colors.text },
 
   // Face is an EXTRA path, not a replacement — the PIN below it always works.
-  faceBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.md, backgroundColor: colors.primary, borderRadius: radius.lg, paddingVertical: spacing.lg, marginTop: spacing.xl, ...shadow.card },
+  faceBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.md, backgroundColor: colors.primary, borderRadius: radius.lg, paddingVertical: spacing.xl, ...shadow.card },
   faceEmoji: { fontSize: 40 },
   faceEn: { color: colors.white, fontSize: 22, fontWeight: '900' },
   faceGu: { color: colors.white, fontSize: 19, fontWeight: '700' },

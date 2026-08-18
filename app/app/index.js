@@ -78,7 +78,7 @@ export default function Home() {
           <Text style={styles.chev}>›</Text>
         </Pressable>
 
-        <Pressable style={[styles.primaryTile, styles.clockTile]} onPress={() => router.push('/face-punch')}>
+        <Pressable style={[styles.primaryTile, styles.clockTile]} onPress={() => router.push('/punch')}>
           <Text style={styles.primaryEmoji}>🕐</Text>
           <View style={{ flex: 1 }}>
             <Text style={styles.primaryTitle}>Time Clock</Text>

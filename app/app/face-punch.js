@@ -117,9 +117,10 @@ export default function FacePunch() {
         if (!alive.current) return;
         setAttempt(i);
         setStatus('scanning');
-        setMessage(i === 1 ? '' : `Try ${i} of ${MAX_TRIES}…`);
-        // Give the camera a moment to settle and the person to look up.
-        await new Promise((r) => setTimeout(r, i === 1 ? 900 : 700));
+        if (i > 1) setMessage(`Try ${i} of ${MAX_TRIES} — hold still`);
+        // Parth: "retry is happening too fast." Give the camera time to settle
+        // AND give the person time to actually reposition before firing again.
+        await new Promise((r) => setTimeout(r, i === 1 ? 1200 : 1800));
         if (!alive.current) return;
 
         const out = await scanOnce();
@@ -129,12 +130,21 @@ export default function FacePunch() {
           running.current = false;
           return;
         }
+        // Leave the reason on screen long enough to read before retrying.
         setMessage(out.why);
+        if (i < MAX_TRIES) {
+          await new Promise((r) => setTimeout(r, 1600));
+          if (!alive.current) return;
+        }
       }
       setStatus('failed');
       running.current = false;
     })();
-  }, [permission?.granted, enrolled, scanOnce, punch]);
+    // `status` MUST be here. Without it, pressing "Try again" reset the status
+    // back to 'starting' but this effect never re-ran, so the screen showed the
+    // camera and never took another photo. The running ref stops re-entry when
+    // the loop itself flips status to 'scanning'.
+  }, [permission?.granted, enrolled, scanOnce, punch, status]);
 
   function retry() {
     running.current = false;
@@ -208,7 +218,7 @@ export default function FacePunch() {
             <ActivityIndicator size="large" color={colors.primary} />
             <Text style={styles.lookTxt}>{L.lookAtCamera.en}</Text>
             <Text style={styles.lookGu}>{L.lookAtCamera.gu}</Text>
-            {attempt > 1 && <Text style={styles.tryTxt}>{message}</Text>}
+            {!!message && <Text style={styles.tryTxt}>{message}</Text>}
           </>
         ) : (
           <>
