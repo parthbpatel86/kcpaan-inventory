@@ -211,8 +211,11 @@ export default function CloseShift() {
               <Text style={styles.muted}>No previous closes recorded yet.</Text>
             ) : (
               closes.map((c, i) => {
-                const cCounted = num(c.paan_cash) + num(c.tobacco_cash);
-                const cOs = c.over_short == null ? cCounted - num(c.expected_cash) : num(c.over_short);
+                // Only tobacco reconciles against expected — so only tobacco may
+                // be shown next to it. Summing paan in here produced rows that
+                // read "Expected $0.00 · Counted $100.00 — ✓ Balanced".
+                const cTobacco = num(c.tobacco_cash);
+                const cOs = c.over_short == null ? cTobacco - num(c.expected_cash) : num(c.over_short);
                 return (
                   <View key={c.id != null ? String(c.id) : `${c.business_date}-${i}`} style={styles.dayCard}>
                     <View style={styles.dayTop}>
@@ -222,8 +225,9 @@ export default function CloseShift() {
                       </Text>
                     </View>
                     <Text style={styles.dayLine}>
-                      Expected {money(num(c.expected_cash))} · Counted {money(cCounted)}
+                      Tobacco {money(cTobacco)} · Expected {money(num(c.expected_cash))}
                     </Text>
+                    <Text style={styles.dayLine}>Paan {money(num(c.paan_cash))}</Text>
                   </View>
                 );
               })

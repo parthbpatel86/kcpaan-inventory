@@ -25,7 +25,7 @@ export default function Confirm() {
   const [employee, setEmployee] = useState(false);   // EMPLOYEE toggle (8%)
   const [discount, setDiscount] = useState(0);       // manual $ discount
   const [discVisible, setDiscVisible] = useState(false);
-  const [cfg, setCfg] = useState({ employee_discount_pct: 8, max_discount_pct: 10 });
+  const [cfg, setCfg] = useState({ employee_discount_pct: 8, max_discount_pct: 8 });
   // One key per checkout attempt: retrying after a timeout must not double-charge.
   const [clientRef, setClientRef] = useState(newClientRef);
 
@@ -33,7 +33,7 @@ export default function Confirm() {
     api.settings()
       .then((s) => setCfg({
         employee_discount_pct: Number(s.employee_discount_pct ?? 8),
-        max_discount_pct: Number(s.max_discount_pct ?? 10),
+        max_discount_pct: Number(s.max_discount_pct ?? 8),
       }))
       .catch(() => {});
   }, []);

@@ -115,9 +115,17 @@ export default function POS() {
             </Pressable>
           </View>
         ) : (
-          <View style={styles.cardAddHint}>
+          // The strip that says "+ Tap" has to BE a button. It sits outside the
+          // card's tap zone, so as a plain View it was the one part of the card
+          // that looked tappable and wasn't — the worst possible target for
+          // staff who read the "+" rather than the English.
+          <Pressable
+            style={styles.cardAddHint}
+            onPress={() => !out && cart.addItem(item)}
+            disabled={out}
+          >
             <Text style={styles.cardAddHintTxt}>{out ? '—' : '+ Tap'}</Text>
-          </View>
+          </Pressable>
         )}
       </View>
     );

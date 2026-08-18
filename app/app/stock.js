@@ -401,7 +401,7 @@ function AdjustRow({ label, value, onChange, onApply }) {
 function StockCounter({ label, value, onChange, onTapNumber, muted }) {
   return (
     <View style={[styles.counter, muted && styles.counterMuted]}>
-      <Text style={styles.counterLabel}>{label}</Text>
+      <Text style={styles.counterLabel} numberOfLines={1}>{label}</Text>
       <Pressable
         style={[styles.counterBtn, value <= 0 && styles.counterBtnOff]}
         onPress={() => onChange(-1)}
@@ -546,7 +546,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm, paddingVertical: 6,
   },
   counterMuted: { backgroundColor: colors.surfaceAlt },
-  counterLabel: { fontSize: 18, fontWeight: '800', color: colors.textMuted, width: 34 },
+  // Wide enough for "Shop" at 18pt bold — at width 34 it wrapped to "Sho/p".
+  counterLabel: { fontSize: 18, fontWeight: '800', color: colors.textMuted, width: 52 },
   counterBtn: {
     width: 38, height: 38, borderRadius: 19, backgroundColor: colors.primary,
     alignItems: 'center', justifyContent: 'center',
