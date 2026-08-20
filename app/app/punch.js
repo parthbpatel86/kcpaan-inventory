@@ -77,16 +77,18 @@ export default function Punch() {
           <ActivityIndicator color={colors.primary} />
         ) : (
           <>
-            {/* Face is the fast path, so it goes first — Parth: "Move the scan
-                face to the top before 1. Tap your name." */}
-            <Pressable style={styles.faceBtn} onPress={() => router.push('/face-punch')}>
-              <Text style={styles.faceEmoji}>😀</Text>
-              <View>
-                <Text style={styles.faceEn}>{L.scanFace.en}</Text>
-                <Text style={styles.faceGu}>{L.scanFace.gu}</Text>
+            {/* Tapping an NFC tag works on every screen, so this screen only
+                explains it — the reader is already listening. Parth dropped the
+                face option: "face scanning is not promising and has a lot of
+                bugs." */}
+            <View style={styles.tagCard}>
+              <Text style={styles.tagEmoji}>📶</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.tagEn}>Tap your tag</Text>
+                <Text style={styles.tagGu}>તમારું ટૅગ અડાડો</Text>
+                <Text style={styles.tagHint}>Hold it to the back of the phone.</Text>
               </View>
-            </Pressable>
-            <Text style={styles.faceHint}>No name, no PIN — just look at the phone.</Text>
+            </View>
 
             <Text style={styles.orTxt}>— or —</Text>
 
@@ -181,7 +183,15 @@ const styles = StyleSheet.create({
   staffNameOn: { color: colors.white },
   staffState: { fontSize: 18, fontWeight: '700', color: colors.textMuted },
 
-  faceHint: { fontSize: 18, color: colors.textMuted, textAlign: 'center', marginTop: spacing.sm },
+  tagCard: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    backgroundColor: colors.primaryLight, borderRadius: radius.lg,
+    padding: spacing.lg, borderWidth: 2, borderColor: colors.primary,
+  },
+  tagEmoji: { fontSize: 40 },
+  tagEn: { fontSize: 24, fontWeight: '900', color: colors.text },
+  tagGu: { fontSize: 20, fontWeight: '700', color: colors.textMuted },
+  tagHint: { fontSize: 18, color: colors.textMuted, marginTop: 2 },
   orTxt: { fontSize: 19, fontWeight: '700', color: colors.textLight, textAlign: 'center', marginTop: spacing.lg },
 
   modalBg: { flex: 1, backgroundColor: '#00000088', alignItems: 'center', justifyContent: 'center', padding: spacing.lg },

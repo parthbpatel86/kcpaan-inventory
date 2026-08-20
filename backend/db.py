@@ -253,6 +253,10 @@ CREATE TABLE IF NOT EXISTS employees (
     -- Reserved for a future USB/BT fingerprint reader: the phone's own
     -- biometric API cannot identify *which* employee, only the device owner.
     finger_id  TEXT,
+    -- NFC tag (NTAG215) UID, uppercase hex, no separators. A tag is a physical
+    -- token: it identifies WHICH employee, which the phone's own biometric API
+    -- cannot. Tapping is the primary clock-in; the PIN stays as the fallback.
+    nfc_uid    TEXT,
     -- Face recognition: JSON array of ArcFace embeddings (one per enrolment
     -- photo). These are numeric vectors, NOT photographs — a face cannot be
     -- reconstructed from them. Matching happens on the device; the server only
@@ -324,6 +328,7 @@ def init_db():
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_client_ref ON sales(client_ref)"
             )
             cur.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS face_data TEXT")
+            cur.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS nfc_uid TEXT")
             cur.execute(
                 "ALTER TABLE punches ADD COLUMN IF NOT EXISTS method TEXT NOT NULL DEFAULT 'pin'"
             )
@@ -355,6 +360,9 @@ def init_db():
                 conn.execute(ddl)
         if "client_ref" not in scols:
             conn.execute("ALTER TABLE sales ADD COLUMN client_ref TEXT")
+        ecols = {r[1] for r in conn.execute("PRAGMA table_info(employees)")}
+        if "nfc_uid" not in ecols:
+            conn.execute("ALTER TABLE employees ADD COLUMN nfc_uid TEXT")
         conn.execute(
             "INSERT OR IGNORE INTO settings (key, value) VALUES ('stock_pin', ?)",
             (default_pin,),

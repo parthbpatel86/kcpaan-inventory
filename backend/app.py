@@ -44,6 +44,18 @@ def _iso_day(v):
     return v.isoformat() if hasattr(v, "isoformat") else str(v)
 
 
+def _norm_uid(v):
+    """An NFC tag UID as uppercase hex with no separators.
+
+    Readers hand the same tag back as "04:A2:2B:1C", "04a22b1c" or with
+    trailing whitespace depending on the platform. Storing and comparing a
+    single canonical form stops one tag enrolling as two.
+    """
+    if not v:
+        return ""
+    return "".join(c for c in str(v).upper() if c in "0123456789ABCDEF")
+
+
 def _get_pin(conn):
     """PIN lives in the settings table (seeded by init_db); env is a fallback."""
     row = conn.execute("SELECT value FROM settings WHERE key = 'stock_pin'").fetchone()
@@ -636,14 +648,23 @@ def update_settings():
 def list_employees():
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, name, active FROM employees WHERE active = 1 ORDER BY name"
+            "SELECT id, name, active, nfc_uid FROM employees WHERE active = 1 ORDER BY name"
         ).fetchall()
         open_rows = conn.execute(
             "SELECT employee_id FROM punches WHERE punch_out IS NULL"
         ).fetchall()
     open_ids = {r["employee_id"] for r in open_rows}
+    # has_nfc, not nfc_uid: the UID is a credential. The clock screen only needs
+    # to know whether a tag is registered, so the value itself never leaves the
+    # server on this route.
     return jsonify([
-        {"id": r["id"], "name": r["name"], "on_clock": r["id"] in open_ids} for r in rows
+        {
+            "id": r["id"],
+            "name": r["name"],
+            "on_clock": r["id"] in open_ids,
+            "has_nfc": bool(r["nfc_uid"]),
+        }
+        for r in rows
     ])
 
 
@@ -681,6 +702,11 @@ def update_employee(eid):
         if f in d:
             sets.append(f"{f} = ?")
             vals.append(d[f])
+    # Tag registration / removal. Normalised on the way in so the same physical
+    # tag always compares equal; an empty value un-registers the tag.
+    if "nfc_uid" in d:
+        sets.append("nfc_uid = ?")
+        vals.append(_norm_uid(d["nfc_uid"]) or None)
     if not sets:
         return jsonify({"error": "no fields"}), 400
     vals.append(eid)
@@ -694,6 +720,17 @@ def update_employee(eid):
             ).fetchone()
             if clash:
                 return jsonify({"error": "pin already used"}), 409
+        # One tag, one person. Without this, tapping a re-used tag would clock
+        # in whichever row the database returned first.
+        uid = _norm_uid(d.get("nfc_uid")) if "nfc_uid" in d else ""
+        if uid:
+            taken = conn.execute(
+                "SELECT id FROM employees WHERE nfc_uid = ? AND active = 1 AND id <> ?",
+                (uid, eid),
+            ).fetchone()
+            if taken:
+                # Same policy as PINs: say it is taken, do not say by whom.
+                return jsonify({"error": "tag already used"}), 409
         conn.execute(f"UPDATE employees SET {', '.join(sets)} WHERE id = ?", vals)
     return jsonify({"ok": True})
 
@@ -736,12 +773,29 @@ def punch():
     # it tells us WHICH employee it matched. PIN stays as the fallback for when
     # a face won't read — bad light, a mask, a queue out the door.
     emp_id = d.get("employee_id")
-    method = "face" if (emp_id and not pin) else "pin"
-    if not pin and not emp_id:
-        return jsonify({"error": "pin or employee_id required"}), 400
+    # An NFC tag is a physical token tied to one person, so it identifies the
+    # employee outright — no name to pick, no PIN to type, nothing to match.
+    nfc_uid = _norm_uid(d.get("nfc_uid"))
+    if nfc_uid:
+        method = "nfc"
+    elif emp_id and not pin:
+        method = "face"
+    else:
+        method = "pin"
+    if not pin and not emp_id and not nfc_uid:
+        return jsonify({"error": "pin, employee_id or nfc_uid required"}), 400
 
     with get_conn() as conn:
-        if emp_id and not pin:
+        if nfc_uid:
+            emp = conn.execute(
+                "SELECT * FROM employees WHERE nfc_uid = ? AND active = 1", (nfc_uid,)
+            ).fetchone()
+            if not emp:
+                return jsonify({
+                    "error": "unknown tag",
+                    "message": "This tag is not registered to anyone.",
+                }), 404
+        elif emp_id and not pin:
             emp = conn.execute(
                 "SELECT * FROM employees WHERE id = ? AND active = 1", (int(emp_id),)
             ).fetchone()

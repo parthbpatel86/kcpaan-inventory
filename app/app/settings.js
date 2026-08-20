@@ -5,15 +5,18 @@
 // owner authenticated" — it cannot say WHICH employee is standing there. A PIN
 // is the only thing on this hardware that identifies a specific person.
 import { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, TextInput, Alert, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Pressable, TextInput, Alert, ActivityIndicator, ScrollView, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { colors, radius, spacing, shadow } from '../src/lib/theme';
 import { api } from '../src/lib/api';
 import KeyboardScreen from '../src/components/KeyboardScreen';
+import { useNfc } from '../src/components/NfcProvider';
 
 export default function Settings() {
   const router = useRouter();
+  const { supported: nfcSupported, enabled: nfcEnabled, captureTag, cancelCapture } = useNfc();
+  const [tagFor, setTagFor] = useState(null);   // employee awaiting a tag tap
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [empDiscount, setEmpDiscount] = useState('');
@@ -102,6 +105,42 @@ export default function Settings() {
     );
   }
 
+  // Assign a physical tag to one member of staff. The ambient reader hands the
+  // next tap here instead of clocking anybody in.
+  async function registerTag(emp) {
+    if (!nfcSupported) {
+      return Alert.alert('No NFC', 'This device cannot read tags. Staff can still use their PIN.');
+    }
+    if (!nfcEnabled) {
+      return Alert.alert('NFC is off', 'Switch NFC on in Android settings, then try again.');
+    }
+    setTagFor(emp);
+    try {
+      const uid = await captureTag();
+      await api.updateEmployee(emp.id, { nfc_uid: uid });
+      setTagFor(null);
+      Alert.alert('Tag registered', `${emp.name} can now clock in by tapping this tag.`);
+      load();
+    } catch (e) {
+      setTagFor(null);
+      const msg = String(e?.message || e);
+      if (msg === 'cancelled') return;
+      Alert.alert(
+        'Could not register',
+        /409/.test(msg) ? 'That tag is already assigned to someone else.' : msg,
+      );
+    }
+  }
+
+  async function removeTag(emp) {
+    try {
+      await api.updateEmployee(emp.id, { nfc_uid: '' });
+      load();
+    } catch (e) {
+      Alert.alert('Could not remove', String(e?.message || e));
+    }
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.header}>
@@ -160,13 +199,13 @@ export default function Settings() {
                   {isActive(e) ? (
                     <>
                       <Pressable
-                        style={styles.faceBtn}
-                        onPress={() =>
-                          router.push({ pathname: '/enroll-face', params: { id: e.id, name: e.name } })
-                        }
+                        style={[styles.faceBtn, e.has_nfc && styles.tagBtnOn]}
+                        onPress={() => (e.has_nfc ? removeTag(e) : registerTag(e))}
                         hitSlop={8}
                       >
-                        <Text style={styles.faceText}>😀 Face</Text>
+                        <Text style={styles.faceText}>
+                          {e.has_nfc ? '✓ Tag' : '📶 Tag'}
+                        </Text>
                       </Pressable>
                       <Pressable style={styles.deactivateBtn} onPress={() => deactivate(e)} hitSlop={8}>
                         <Text style={styles.deactivateText}>Deactivate</Text>
@@ -237,6 +276,23 @@ export default function Settings() {
           </>
         )}
       </KeyboardScreen>
+      <Modal visible={!!tagFor} transparent animationType="fade"
+             onRequestClose={() => { cancelCapture(); setTagFor(null); }}>
+        <View style={styles.tagModalBg}>
+          <View style={styles.tagModalCard}>
+            <Text style={styles.tagModalEmoji}>📶</Text>
+            <Text style={styles.tagModalName}>{tagFor?.name}</Text>
+            <Text style={styles.tagModalHint}>
+              Hold the tag against the BACK of the phone.
+            </Text>
+            <ActivityIndicator style={{ marginTop: spacing.lg }} color={colors.primary} />
+            <Pressable style={styles.tagModalCancel}
+                       onPress={() => { cancelCapture(); setTagFor(null); }}>
+              <Text style={styles.tagModalCancelTxt}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -282,6 +338,14 @@ const styles = StyleSheet.create({
   staffState: { fontSize: 18, fontWeight: '700', color: colors.textMuted, marginTop: 2 },
   faceBtn: { backgroundColor: colors.primary, borderRadius: radius.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   faceText: { color: colors.white, fontSize: 18, fontWeight: '800' },
+  tagBtnOn: { backgroundColor: colors.healthy },
+  tagModalBg: { flex: 1, backgroundColor: '#00000088', alignItems: 'center', justifyContent: 'center', padding: spacing.lg },
+  tagModalCard: { width: '100%', backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.xl, alignItems: 'center' },
+  tagModalEmoji: { fontSize: 54 },
+  tagModalName: { fontSize: 28, fontWeight: '900', color: colors.text, marginTop: spacing.sm },
+  tagModalHint: { fontSize: 20, color: colors.textMuted, textAlign: 'center', marginTop: spacing.sm },
+  tagModalCancel: { marginTop: spacing.xl, paddingVertical: spacing.md, paddingHorizontal: spacing.xl },
+  tagModalCancelTxt: { fontSize: 20, fontWeight: '800', color: colors.textMuted },
   deactivateBtn: { backgroundColor: colors.danger, borderRadius: radius.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   deactivateText: { color: colors.white, fontSize: 18, fontWeight: '800' },
 

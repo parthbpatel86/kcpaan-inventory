@@ -156,6 +156,47 @@ with get_conn() as conn:
     ).fetchone()["method"]
 check("PIN punches still record method='pin'", m2 in ("face", "pin"), f"method={m2}")
 
+print("\n== NFC tag clock-in (NTAG215) ==")
+# A tag is a physical token bound to one person, so tapping identifies the
+# employee outright: no name to pick, no PIN, no matching threshold.
+with get_conn() as conn:
+    conn.execute("UPDATE punches SET punch_out = datetime('now') WHERE punch_out IS NULL")
+
+reg = c.put(f"/api/employees/{eid}", json={"nfc_uid": "04:A2:2B:1C:5D:6E:7F"})
+check("tag registers to an employee", reg.status_code == 200, str(reg.get_json()))
+
+lst = c.get("/api/employees").get_json()
+me = next((x for x in lst if x["id"] == eid), None)
+check("employee list reports has_nfc", bool(me and me.get("has_nfc")), str(me))
+check("employee list does NOT leak the UID", "nfc_uid" not in (me or {}), str(me))
+
+# Same physical tag, different formatting from the reader.
+r = c.post("/api/punch", json={"nfc_uid": "04a22b1c5d6e7f"})
+check("tap clocks IN regardless of UID formatting", r.get_json().get("action") == "in", str(r.get_json()))
+
+with get_conn() as conn:
+    m = conn.execute(
+        "SELECT method FROM punches WHERE employee_id = ? ORDER BY id DESC LIMIT 1", (eid,)
+    ).fetchone()["method"]
+check("punch recorded with method='nfc'", m == "nfc", f"method={m}")
+
+r = c.post("/api/punch", json={"nfc_uid": "04-A2-2B-1C-5D-6E-7F"})
+check("tapping again clocks OUT (auto toggle)", r.get_json().get("action") == "out", str(r.get_json()))
+
+r = c.post("/api/punch", json={"nfc_uid": "DEADBEEF001122"})
+check("unregistered tag is refused", r.status_code == 404, str(r.get_json()))
+
+other = c.post("/api/employees", json={"name": "Tagless", "pin": "4444"}).get_json()
+dupt = c.put(f"/api/employees/{other['id']}", json={"nfc_uid": "04A22B1C5D6E7F"})
+check("one tag cannot be registered to two people", dupt.status_code == 409, str(dupt.get_json()))
+check("tag rejection does NOT name the holder", "used_by" not in (dupt.get_json() or {}), str(dupt.get_json()))
+
+clr = c.put(f"/api/employees/{other['id']}", json={"nfc_uid": ""})
+check("empty uid un-registers without error", clr.status_code == 200, str(clr.get_json()))
+
+r = c.post("/api/punch", json={})
+check("punch with no credential at all is refused", r.status_code == 400, str(r.get_json()))
+
 print("\n== duplicate PINs are refused (payroll integrity) ==")
 # Two people sharing a PIN meant a punch clocked in whichever row the database
 # returned first — silently wrong hours for both.

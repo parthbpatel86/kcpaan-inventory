@@ -96,6 +96,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ employee_id: employeeId, intent }),
     }),
+  // Punch by NFC tag. The UID alone identifies the employee, so no name and no
+  // PIN are sent; the server toggles IN/OUT from the open shift.
+  punchByNfc: (uid) =>
+    req('/api/punch', {
+      method: 'POST',
+      body: JSON.stringify({ nfc_uid: uid }),
+    }),
   timesheet: (params = '') => req(`/api/timesheet${params}`),
   updatePunch: (id, data) =>
     req(`/api/punches/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
