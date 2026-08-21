@@ -11,9 +11,11 @@ import { useRouter } from 'expo-router';
 import { colors, radius, spacing, shadow } from '../src/lib/theme';
 import { api } from '../src/lib/api';
 import { L } from '../src/lib/labels';
+import { useNfc } from '../src/components/NfcProvider';
 
 export default function Punch() {
   const router = useRouter();
+  const { punchCount } = useNfc();
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [pin, setPin] = useState('');
@@ -27,6 +29,9 @@ export default function Punch() {
       .finally(() => setLoading(false));
 
   useEffect(() => { load(); }, []);
+  // Same reason as Home: a tap does not change focus, so refresh the IN/OUT
+  // chips explicitly when one lands.
+  useEffect(() => { if (punchCount) load(); }, [punchCount]);
 
   // Parth: "no need to tap on name, then edit pin, and then in/out." The PIN
   // sheet opens the moment a name is tapped and fires as soon as the 4th digit

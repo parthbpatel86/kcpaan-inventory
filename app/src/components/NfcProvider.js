@@ -18,6 +18,7 @@ import NfcTapButton from './NfcTapButton';
 const NfcCtx = createContext({
   supported: false, enabled: false, hint: () => {},
   captureTag: () => Promise.reject(new Error('no nfc')), cancelCapture: () => {}, notify: () => {},
+  punchCount: 0,
 });
 export const useNfc = () => useContext(NfcCtx);
 
@@ -28,6 +29,10 @@ const REPEAT_LOCKOUT_MS = 6000;
 export function NfcProvider({ children }) {
   const [status, setStatus] = useState({ supported: false, enabled: false });
   const [toast, setToast] = useState(null);   // {kind, title, sub}
+  // Bumped on every successful punch. Screens showing who is on the clock watch
+  // this: a tap happens while the screen is already focused, so useFocusEffect
+  // never re-fires and "Working now" would sit there stale.
+  const [punchCount, setPunchCount] = useState(0);
   const lastTag = useRef({ uid: '', at: 0 });
   const busy = useRef(false);
   // While a manager is registering a tag, the next read must go to enrolment
@@ -60,6 +65,7 @@ export function NfcProvider({ children }) {
     try {
       const res = await api.punchByNfc(uid);
       const isIn = res.action === 'in';
+      setPunchCount((n) => n + 1);
       show(
         isIn ? 'in' : 'out',
         `${res.employee} — ${isIn ? 'CLOCKED IN' : 'CLOCKED OUT'}`,
@@ -119,7 +125,9 @@ export function NfcProvider({ children }) {
   }, []);
 
   return (
-    <NfcCtx.Provider value={{ ...status, hint, captureTag, cancelCapture, notify: show }}>
+    <NfcCtx.Provider
+      value={{ ...status, hint, captureTag, cancelCapture, notify: show, punchCount }}
+    >
       {children}
       <NfcTapButton />
       <PunchToast toast={toast} onDone={() => setToast(null)} onPress={

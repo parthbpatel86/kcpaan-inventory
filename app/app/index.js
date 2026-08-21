@@ -3,7 +3,7 @@
 // Parth: "Move things for manager to manager portal on upper right corner."
 // So staff see exactly two big choices (sell / clock), and everything a manager
 // needs sits behind the ⚙ button top-right, gated by the stock PIN.
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   View, Text, StyleSheet, Pressable, Modal, TextInput, ActivityIndicator, Alert, ScrollView,
 } from 'react-native';
@@ -13,9 +13,11 @@ import { colors, radius, spacing, shadow } from '../src/lib/theme';
 import { api } from '../src/lib/api';
 import { verifyPin } from '../src/lib/pin';
 import { L } from '../src/lib/labels';
+import { useNfc } from '../src/components/NfcProvider';
 
 export default function Home() {
   const router = useRouter();
+  const { punchCount } = useNfc();
   const [pinVisible, setPinVisible] = useState(false);
   const [pin, setPin] = useState('');
   const [checking, setChecking] = useState(false);
@@ -31,6 +33,9 @@ export default function Home() {
   }, []);
 
   useFocusEffect(useCallback(() => { loadDash(); }, [loadDash]));
+  // A tag can be tapped while this screen is already open, so focus never
+  // changes and "Working now" would show stale names until you navigated away.
+  useEffect(() => { if (punchCount) loadDash(); }, [punchCount, loadDash]);
 
   async function submitPin() {
     setChecking(true);
