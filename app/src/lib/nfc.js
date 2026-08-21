@@ -8,13 +8,28 @@
 // We only ever read the tag's UID, which is burned in at the factory and cannot
 // be changed. Nothing is written to the tag, so a blank NTAG215 straight out of
 // the bag works and no bad write can brick one.
-import NfcManager, { NfcEvents } from 'react-native-nfc-manager';
+import NfcManager, { NfcEvents, NfcAdapter } from 'react-native-nfc-manager';
 
 let startedOnce = false;
 
 /** Uppercase hex, no separators — must match the server's _norm_uid(). */
 export function normUid(raw) {
   return String(raw || '').toUpperCase().replace(/[^0-9A-F]/g, '');
+}
+
+/**
+ * A tag's UID, whichever shape the platform hands it over in.
+ *
+ * Android usually gives tag.id as a hex string, but on some devices/versions it
+ * arrives as a byte array. Treating an array with String() would produce
+ * "4,170,187" and silently yield a wrong UID, so handle it explicitly.
+ */
+export function uidFromTag(tag) {
+  const raw = tag?.id;
+  if (Array.isArray(raw)) {
+    return raw.map((b) => (b & 0xff).toString(16).padStart(2, '0')).join('').toUpperCase();
+  }
+  return normUid(raw);
 }
 
 /**
@@ -42,10 +57,29 @@ export async function startListening(onUid) {
   if (!supported || !enabled) return false;
   try {
     NfcManager.setEventListener(NfcEvents.DiscoverTag, (tag) => {
-      const uid = normUid(tag?.id);
-      if (uid) onUid(uid);
+      onUid(uidFromTag(tag), tag);
     });
-    await NfcManager.registerTagEvent();
+    // Reader Mode, NOT foreground dispatch.
+    //
+    // The library defaults to foreground dispatch, which routes the tag through
+    // Android's NDEF discovery pipeline. A tag with no NDEF payload — which is
+    // exactly what a blank NTAG215 is — makes Android buzz and keep the tag
+    // instead of handing it to us: the tap is felt but never arrives.
+    // Reader Mode takes over the stack while we are in the foreground and
+    // delivers every tag directly.
+    await NfcManager.registerTagEvent({
+      isReaderModeEnabled: true,
+      readerModeFlags:
+        NfcAdapter.FLAG_READER_NFC_A |
+        NfcAdapter.FLAG_READER_NFC_B |
+        NfcAdapter.FLAG_READER_NFC_F |
+        NfcAdapter.FLAG_READER_NFC_V |
+        // Do not try to parse NDEF: we only want the UID, and the parse step is
+        // what loses blank tags.
+        NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK |
+        NfcAdapter.FLAG_READER_NO_PLATFORM_SOUNDS,
+      readerModeDelay: 250,
+    });
     return true;
   } catch (e) {
     return false;

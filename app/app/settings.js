@@ -116,15 +116,26 @@ export default function Settings() {
     }
     setTagFor(emp);
     try {
-      const uid = await captureTag();
+      // Never hang on the "hold the tag" sheet — if nothing arrives, say so.
+      const uid = await Promise.race([
+        captureTag(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 25000)),
+      ]);
       await api.updateEmployee(emp.id, { nfc_uid: uid });
       setTagFor(null);
       Alert.alert('Tag registered', `${emp.name} can now clock in by tapping this tag.`);
       load();
     } catch (e) {
       setTagFor(null);
+      cancelCapture();
       const msg = String(e?.message || e);
       if (msg === 'cancelled') return;
+      if (msg === 'timeout') {
+        return Alert.alert(
+          'No tag detected',
+          'Hold the tag flat against the upper back of the phone, near the camera, and keep it there for a second.',
+        );
+      }
       Alert.alert(
         'Could not register',
         /409/.test(msg) ? 'That tag is already assigned to someone else.' : msg,

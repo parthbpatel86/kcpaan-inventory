@@ -38,8 +38,15 @@ export function NfcProvider({ children }) {
     setToast({ kind, title, sub, key: `${Date.now()}` });
   }, []);
 
-  const onUid = useCallback(async (uid) => {
+  const onUid = useCallback(async (uid, tag) => {
     const now = Date.now();
+    // A tag arrived but carried no readable ID. Say so out loud — the old code
+    // dropped it silently, which looked identical to "nothing happened".
+    if (!uid) {
+      show('error', 'Tag read failed',
+        `Detected a tag but could not read its ID${tag?.techTypes ? ` (${String(tag.techTypes).slice(0, 40)})` : ''}.`);
+      return;
+    }
     if (capture.current) {
       const { resolve } = capture.current;
       capture.current = null;
