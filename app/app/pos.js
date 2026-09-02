@@ -4,12 +4,12 @@
 // reading; a search box because scrolling 50 products at a queue is slow; and
 // checkout moved to a full confirm screen (app/confirm.js) so the order is
 // reviewed against the counter before money changes hands.
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   View, Text, StyleSheet, Pressable, FlatList, ActivityIndicator,
-  RefreshControl, ScrollView, TextInput, useWindowDimensions, Keyboard,
+  RefreshControl, ScrollView, TextInput, useWindowDimensions, Keyboard, AppState,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, spacing, shadow, HEALTH } from '../src/lib/theme';
 import { api } from '../src/lib/api';
@@ -61,6 +61,24 @@ export default function POS() {
   }, [cart]);
 
   useEffect(() => { load(); }, []);
+
+  // Parth: "when I edit quantity in my app, it wasnt updating in shop app."
+  // The till sits on this screen all day, so nothing ever re-fetched: a stock
+  // correction made on the manager's phone stayed invisible here until someone
+  // pulled to refresh. Poll while this screen is focused and the app is in the
+  // foreground. A ref keeps the interval from being torn down and recreated
+  // every time the cart changes.
+  const loadRef = useRef(load);
+  useEffect(() => { loadRef.current = load; }, [load]);
+  useFocusEffect(
+    useCallback(() => {
+      loadRef.current();
+      const id = setInterval(() => {
+        if (AppState.currentState === 'active') loadRef.current();
+      }, 30000);
+      return () => clearInterval(id);
+    }, [])
+  );
 
   // Parth: "when we try to search for an item in the shop sales, the currently
   // selected total and 'review order' bar is hidden behind the keyboard."

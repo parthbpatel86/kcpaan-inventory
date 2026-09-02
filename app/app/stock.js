@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, Pressable, FlatList, ActivityIndicator,
   Modal, TextInput, Alert, RefreshControl, ScrollView, KeyboardAvoidingView, Platform,
 } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, spacing, shadow, HEALTH } from '../src/lib/theme';
 import { api } from '../src/lib/api';
@@ -42,6 +42,9 @@ export default function Stock() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  // Stock also changes at the till and on other phones, so re-read it whenever
+  // this screen comes back into view rather than showing a stale count.
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const filtered = products.filter((p) => {
     if (filter === 'reorder' && p.health !== 'order') return false;
