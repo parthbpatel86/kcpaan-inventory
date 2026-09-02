@@ -11,6 +11,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, spacing, shadow } from '../src/lib/theme';
 import { api } from '../src/lib/api';
+import NfcHeaderButton from '../src/components/NfcHeaderButton';
 import { verifyPin } from '../src/lib/pin';
 import { L } from '../src/lib/labels';
 import { useNfc } from '../src/components/NfcProvider';
@@ -62,6 +63,7 @@ export default function Home() {
       <ScrollView contentContainerStyle={styles.scroll}>
         {/* Manager door — top right, small on purpose so staff don't wander in */}
         <View style={styles.topBar}>
+          <NfcHeaderButton />
           <View style={{ flex: 1 }} />
           <Pressable style={styles.mgrBtn} onPress={() => { setPin(''); setPinVisible(true); }} hitSlop={10}>
             <Text style={styles.mgrEmoji}>⚙️</Text>

@@ -90,12 +90,22 @@ r = c.post("/api/sales", json={"payment_type": "employee", "discount": 5.0,
 j = r.get_json()
 check("employee sale ignores manual discount (=4.00)", abs(j["discount"] - 4.0) < 0.01, str(j))
 
-print("\n== stock cannot go negative ==")
+print("\n== a wrong shop count must not block a sale ==")
+# Parth: "make sure we are able to still place order with 0 stock in shop
+# because sometimes there is a problem with counting."
 pid4 = product_id("StockGuard", 5.0, 3)
 r = c.post("/api/sales", json={"payment_type": "cash", "items": [{"product_id": pid4, "qty": 10}]})
+j = r.get_json()
 with get_conn() as conn:
     q = conn.execute("SELECT shop_qty FROM products WHERE id = ?", (pid4,)).fetchone()["shop_qty"]
-check("oversell rejected or clamped at 0", r.status_code >= 400 or q >= 0, f"status={r.status_code} qty={q}")
+check("sale completes even though only 3 were counted", r.status_code == 201, f"status={r.status_code} {j}")
+check("customer is charged for all 10", abs(j.get("total", 0) - 50.0) < 0.01, str(j))
+check("shop count floors at 0, never negative", q == 0, f"qty={q}")
+check("the oversell is reported back", bool(j.get("oversold")), str(j.get("oversold")))
+
+pid4b = product_id("ZeroStock", 7.0, 0)
+r = c.post("/api/sales", json={"payment_type": "cash", "items": [{"product_id": pid4b, "qty": 1}]})
+check("an item showing 0 left can still be sold", r.status_code == 201, str(r.get_json()))
 
 print("\n== idempotent sale (no double charge on retry) ==")
 pid5 = product_id("IdemTest", 10.0, 50)
@@ -155,6 +165,43 @@ with get_conn() as conn:
         "SELECT method FROM punches WHERE employee_id = ? ORDER BY id DESC LIMIT 1", (eid,)
     ).fetchone()["method"]
 check("PIN punches still record method='pin'", m2 in ("face", "pin"), f"method={m2}")
+
+print("\n== a shift left open yesterday does not block today ==")
+# Parth: "when someone forgot to checkout previous day, they cannot checkin in
+# next day." 14 hours alone does not cover it: in at 9pm, back at 8am is 11h,
+# which used to be read as a clock-OUT so the day could never be started.
+with get_conn() as conn:
+    conn.execute("UPDATE punches SET punch_out = datetime('now') WHERE punch_out IS NULL")
+    conn.execute(
+        "INSERT INTO punches (employee_id, punch_in) VALUES (?, datetime('now','-11 hours','-1 day'))",
+        (eid,),
+    )
+r = c.post("/api/punch", json={"pin": "1111"}).get_json()
+check("yesterday's open shift yields a fresh punch IN, not an OUT",
+      r.get("action") == "in", str(r))
+check("the stale shift is flagged for the manager",
+      "not closed" in (r.get("warning") or ""), str(r))
+with get_conn() as conn:
+    n = conn.execute(
+        "SELECT COUNT(*) AS n FROM punches WHERE employee_id = ? AND flag = 'MISSING_OUT'", (eid,)
+    ).fetchone()["n"]
+check("stale row marked MISSING_OUT", n >= 1, f"count={n}")
+
+print("\n== a punch can be deleted outright ==")
+with get_conn() as conn:
+    victim = conn.execute(
+        "SELECT id FROM punches WHERE employee_id = ? ORDER BY id DESC LIMIT 1", (eid,)
+    ).fetchone()["id"]
+d = c.delete(f"/api/punches/{victim}")
+check("delete accepted", d.status_code == 200, str(d.get_json()))
+with get_conn() as conn:
+    gone = conn.execute("SELECT COUNT(*) AS n FROM punches WHERE id = ?", (victim,)).fetchone()["n"]
+    logged = conn.execute(
+        "SELECT COUNT(*) AS n FROM punch_audit WHERE punch_id = ? AND field = 'deleted'", (victim,)
+    ).fetchone()["n"]
+check("row is really gone", gone == 0, f"remaining={gone}")
+check("deletion is written to the audit log", logged == 1, f"audit rows={logged}")
+check("deleting a missing punch 404s", c.delete("/api/punches/999999").status_code == 404)
 
 print("\n== NFC tag clock-in (NTAG215) ==")
 # A tag is a physical token bound to one person, so tapping identifies the

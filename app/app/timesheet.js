@@ -89,6 +89,35 @@ export default function Timesheet() {
     }
   }
 
+  // Parth: "is there a way to delete a older time?" Confirmed first, because a
+  // punch is payroll — and the server writes it to the audit log before it goes.
+  function deleteRow() {
+    if (!editing || saving) return;
+    Alert.alert(
+      'Delete this entry?',
+      'The row will be removed from the timesheet. This is recorded in the audit log.',
+      [
+        { text: 'Keep it', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setSaving(true);
+            try {
+              await api.deletePunch(editing.id);
+              setEditing(null);
+              loadRows();
+            } catch (e) {
+              Alert.alert('Could not delete', String(e.message || e));
+            } finally {
+              setSaving(false);
+            }
+          },
+        },
+      ],
+    );
+  }
+
   function onPicked(event, date) {
     const p = picker;
     setPicker(null);
@@ -252,6 +281,10 @@ export default function Timesheet() {
 
             <Text style={styles.note}>This correction is recorded in the manager audit log.</Text>
 
+            <Pressable style={styles.deleteBtn} onPress={deleteRow} disabled={saving}>
+              <Text style={styles.deleteText}>🗑  Delete this entry</Text>
+            </Pressable>
+
             <View style={{ flexDirection: 'row', gap: spacing.sm }}>
               <Pressable style={styles.cancel} onPress={() => setEditing(null)}>
                 <Text style={styles.cancelText}>Cancel</Text>
@@ -315,9 +348,20 @@ function parseStamp(s) {
   return isNaN(d.getTime()) ? null : d;
 }
 
-/** What the API expects back. Seconds are always :00 — we never collect them. */
+/**
+ * What the API expects back: an absolute instant, in UTC.
+ *
+ * This used to send a naive local string ("2026-08-20 11:00:00"). punch_in is a
+ * TIMESTAMPTZ and Render's session runs in UTC, so Postgres read 11:00 as
+ * 11:00 UTC and stored 04:00 Pacific — Parth: "when I enter 11am in the
+ * timesheet under manager, it converts that to 4am". toISOString() carries the
+ * offset, so the instant survives the round trip. Seconds are always :00; we
+ * never collect them.
+ */
 function sqlStamp(d) {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
+  const x = new Date(d);
+  x.setSeconds(0, 0);
+  return x.toISOString();
 }
 
 function defaultStart() {
@@ -431,6 +475,13 @@ const styles = StyleSheet.create({
     textAlign: 'center', marginTop: spacing.sm,
   },
   note: { fontSize: 18, color: colors.textMuted, fontStyle: 'italic', marginTop: 4 },
+  deleteBtn: {
+    alignSelf: 'stretch', alignItems: 'center', paddingVertical: spacing.md,
+    borderRadius: radius.md, borderWidth: 2, borderColor: colors.order,
+    marginBottom: spacing.sm,
+  },
+  deleteText: { color: colors.order, fontSize: 19, fontWeight: '800' },
+
   cancel: {
     flex: 1, padding: spacing.md, borderRadius: radius.md,
     backgroundColor: colors.surfaceAlt, alignItems: 'center',

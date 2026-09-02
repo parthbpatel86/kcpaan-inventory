@@ -13,7 +13,6 @@ import { View, Text, StyleSheet, Animated, AppState, Pressable } from 'react-nat
 import { colors, radius, spacing, shadow } from '../lib/theme';
 import { api } from '../lib/api';
 import { startListening, stopListening, nfcStatus, openNfcSettings } from '../lib/nfc';
-import NfcTapButton from './NfcTapButton';
 
 const NfcCtx = createContext({
   supported: false, enabled: false, hint: () => {},
@@ -129,7 +128,6 @@ export function NfcProvider({ children }) {
       value={{ ...status, hint, captureTag, cancelCapture, notify: show, punchCount }}
     >
       {children}
-      <NfcTapButton />
       <PunchToast toast={toast} onDone={() => setToast(null)} onPress={
         status.supported && !status.enabled ? openNfcSettings : undefined
       } />

@@ -16,6 +16,7 @@ import ProductImage from '../src/components/ProductImage';
 import { colors, radius, spacing, shadow } from '../src/lib/theme';
 import { L } from '../src/lib/labels';
 import { api } from '../src/lib/api';
+import NfcHeaderButton from '../src/components/NfcHeaderButton';
 import { createSaleResilient, newClientRef } from '../src/lib/offline';
 
 export default function Confirm() {
@@ -125,6 +126,7 @@ export default function Confirm() {
           <Text style={styles.back}>‹ {L.cancel.en}</Text>
         </Pressable>
         <Text style={styles.headerTitle}>{L.review.en}</Text>
+        <NfcHeaderButton />
         <Text style={styles.headerCount}>{cart.count}</Text>
       </View>
 

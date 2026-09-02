@@ -10,6 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { colors, radius, spacing, shadow } from '../src/lib/theme';
 import { api } from '../src/lib/api';
+import NfcHeaderButton from '../src/components/NfcHeaderButton';
 import { L } from '../src/lib/labels';
 import { useNfc } from '../src/components/NfcProvider';
 
@@ -74,7 +75,7 @@ export default function Punch() {
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} hitSlop={12}><Text style={styles.back}>‹</Text></Pressable>
         <Text style={styles.headerTitle}>Time Clock</Text>
-        <View style={{ width: 24 }} />
+        <NfcHeaderButton />
       </View>
 
       <ScrollView contentContainerStyle={{ padding: spacing.lg }}>

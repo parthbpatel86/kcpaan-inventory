@@ -104,6 +104,9 @@ export const api = {
       body: JSON.stringify({ nfc_uid: uid }),
     }),
   timesheet: (params = '') => req(`/api/timesheet${params}`),
+  // Remove a punch outright. Editing cannot fix a row that should not exist —
+  // a double tap, a test, someone else's tag.
+  deletePunch: (id) => req(`/api/punches/${id}?by=manager`, { method: 'DELETE' }),
   updatePunch: (id, data) =>
     req(`/api/punches/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   punchAudit: (params = '') => req(`/api/punch-audit${params}`),

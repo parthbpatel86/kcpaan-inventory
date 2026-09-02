@@ -7,12 +7,13 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, Pressable, FlatList, ActivityIndicator,
-  RefreshControl, ScrollView, TextInput, useWindowDimensions,
+  RefreshControl, ScrollView, TextInput, useWindowDimensions, Keyboard,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, spacing, shadow, HEALTH } from '../src/lib/theme';
 import { api } from '../src/lib/api';
+import NfcHeaderButton from '../src/components/NfcHeaderButton';
 import { useCart } from '../src/lib/cart';
 import ProductImage from '../src/components/ProductImage';
 import { syncPending, pendingCount, pendingQtyByProduct } from '../src/lib/offline';
@@ -60,6 +61,19 @@ export default function POS() {
   }, [cart]);
 
   useEffect(() => { load(); }, []);
+
+  // Parth: "when we try to search for an item in the shop sales, the currently
+  // selected total and 'review order' bar is hidden behind the keyboard."
+  // The bar is absolutely positioned at bottom:0, and this app runs
+  // edge-to-edge, where Android's windowSoftInputMode=adjustResize no longer
+  // lifts content. So track the keyboard and lift the bar ourselves.
+  const [kb, setKb] = useState(0);
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow',
+      (e) => setKb(e.endCoordinates?.height || 0));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKb(0));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
 
   // True best sellers (units sold), not just the first six alphabetically.
   const favorites = useMemo(
@@ -144,6 +158,7 @@ export default function POS() {
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} hitSlop={12}><Text style={styles.back}>‹</Text></Pressable>
         <Text style={styles.headerTitle}>Shop Sales</Text>
+        <NfcHeaderButton />
         <Pressable onPress={() => router.push('/history')} hitSlop={12}><Text style={styles.headerIcon}>🧾</Text></Pressable>
       </View>
 
@@ -234,7 +249,7 @@ export default function POS() {
 
       {/* Cart bar → full confirm screen */}
       {cart.count > 0 && (
-        <View style={styles.cartBar}>
+        <View style={[styles.cartBar, kb > 0 && { bottom: kb }]}>
           <View>
             <Text style={styles.cartCount}>{cart.count} {L.items.en}</Text>
             <Text style={styles.cartTotal}>${cart.total.toFixed(2)}</Text>

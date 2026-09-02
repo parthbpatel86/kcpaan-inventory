@@ -386,24 +386,26 @@ def create_sale():
             qty = int(it["qty"])
             if qty <= 0:
                 continue
+            # Parth: "make sure we are able to still place order with 0 stock in
+            # shop because sometimes there is a problem with counting." A wrong
+            # count must never stop a paying customer at the counter. The sale
+            # goes through; the shop count simply floors at 0.
             if row["shop_qty"] < qty:
                 short.append({"id": row["id"], "name": row["name"],
                               "requested": qty, "available": row["shop_qty"]})
-                continue
             subtotal += row["price"] * qty
             resolved.append((row, qty))
 
         # Fail loudly instead of silently dropping lines from the sale.
         if missing:
             return jsonify({"error": "unknown products", "product_ids": missing}), 400
-        if short:
-            return jsonify({"error": "insufficient stock", "items": short}), 409
         if not resolved:
             return jsonify({"error": "no sellable items"}), 400
 
         discount = _resolve_discount(conn, d, subtotal)
         total = round(subtotal - discount, 2)
 
+        oversold = short  # sold past the recorded count; surfaced, never blocking
         cur = conn.execute(
             "INSERT INTO sales (payment_type, subtotal, discount, total, client_ref) VALUES (?,?,?,?,?)",
             (payment_type, subtotal, discount, total, client_ref),
@@ -415,9 +417,11 @@ def create_sale():
                 "INSERT INTO sale_items (sale_id, product_id, name, qty, price) VALUES (?,?,?,?,?)",
                 (sale_id, row["id"], row["name"], qty, row["price"]),
             )
+            # Computed in Python: SQLite spells this max(), Postgres greatest(),
+            # and the translation layer does not cover that difference.
             conn.execute(
-                "UPDATE products SET shop_qty = shop_qty - ?, updated_at=datetime('now') WHERE id = ?",
-                (qty, row["id"]),
+                "UPDATE products SET shop_qty = ?, updated_at=datetime('now') WHERE id = ?",
+                (max(0, row["shop_qty"] - qty), row["id"]),
             )
             conn.execute(
                 "INSERT INTO stock_moves (product_id, kind, location, delta, note) VALUES (?,?,?,?,?)",
@@ -425,7 +429,7 @@ def create_sale():
             )
 
     return jsonify({"id": sale_id, "subtotal": round(subtotal, 2), "discount": round(discount, 2),
-                    "total": round(total, 2), "payment_type": payment_type}), 201
+                    "total": round(total, 2), "payment_type": payment_type, "oversold": oversold}), 201
 
 
 @app.get("/api/sales")
@@ -830,7 +834,18 @@ def punch():
 
         if open_p:
             hours = _open_hours(conn, open_p["punch_in"])
-            if hours is not None and hours > max_h:
+            # Parth: "when someone forgot to checkout previous day, they cannot
+            # checkin in next day." The 14h rule alone does not cover it — clock
+            # in at 9pm, return at 8am and that is only 11h, so the punch was
+            # read as a clock-OUT and the person could never start their day.
+            # A shift opened on an earlier BUSINESS DAY is always stale.
+            open_day = conn.execute(
+                "SELECT date(punch_in,'localtime') AS d FROM punches WHERE id = ?",
+                (open_p["id"],),
+            ).fetchone()
+            from_earlier_day = bool(open_day and open_day["d"]
+                                    and _iso_day(open_day["d"]) != _shop_today())
+            if from_earlier_day or (hours is not None and hours > max_h):
                 # Forgot to punch out: flag the stale row, start a fresh one.
                 conn.execute(
                     "UPDATE punches SET flag = 'MISSING_OUT' WHERE id = ?", (open_p["id"],)
@@ -929,6 +944,30 @@ def fix_punch(pid):
         # Retention: manager edit log is kept for 3 months.
         conn.execute("DELETE FROM punch_audit WHERE changed_at < datetime('now','-90 days')")
     return jsonify({"ok": True})
+
+
+@app.delete("/api/punches/<int:pid>")
+def delete_punch(pid):
+    """Remove a punch outright.
+
+    Parth: "is there a way to delete a older time?" Editing cannot fix a row
+    that should never have existed (a double tap, a test, someone else's tag).
+    The row is written to the audit log before it goes, so a deletion is still
+    accountable.
+    """
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM punches WHERE id = ?", (pid,)).fetchone()
+        if not row:
+            return jsonify({"error": "not found"}), 404
+        conn.execute(
+            """INSERT INTO punch_audit (punch_id, field, old_value, new_value, changed_by)
+               VALUES (?,?,?,?,?)""",
+            (pid, "deleted",
+             f"in={row['punch_in']} out={row['punch_out']}", None,
+             (request.args.get("by") or "manager")),
+        )
+        conn.execute("DELETE FROM punches WHERE id = ?", (pid,))
+    return jsonify({"ok": True, "deleted": pid})
 
 
 @app.get("/api/punch-audit")
