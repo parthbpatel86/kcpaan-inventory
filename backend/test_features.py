@@ -75,13 +75,33 @@ j = r.get_json()
 check("employee sale total = 46.00 (8% off 50)", abs(j["total"] - 46.0) < 0.01, str(j))
 check("employee discount recorded = 4.00", abs(j["discount"] - 4.0) < 0.01, str(j))
 
-print("\n== manual discount capped at 8% of cart ==")
+print("\n== manual discount: capped at 8%, whole dollars, rounded down ==")
 pid2 = product_id("CapTest", 50.0, 100)
 r = c.post("/api/sales", json={"payment_type": "cash", "discount": 20.0,
                                "items": [{"product_id": pid2, "qty": 1}]})
 j = r.get_json()
 check("$20 discount on $50 cart clamped to $4", abs(j["discount"] - 4.0) < 0.01, str(j))
 check("total after cap = 46.00", abs(j["total"] - 46.0) < 0.01, str(j))
+
+# Parth: "rounded lower integer ... It should be flat amounts."
+pid2b = product_id("RoundDown", 20.0, 100)
+r = c.post("/api/sales", json={"payment_type": "cash", "discount_pct": 8,
+                               "items": [{"product_id": pid2b, "qty": 1}]})
+j = r.get_json()
+check("8% of $20 = $1.60 -> given as $1", abs(j["discount"] - 1.0) < 0.01, str(j))
+check("no cents in the total", abs(j["total"] - 19.0) < 0.01, str(j))
+
+pid2c = product_id("FlatOnly", 30.0, 100)
+r = c.post("/api/sales", json={"payment_type": "cash", "discount": 2.75,
+                               "items": [{"product_id": pid2c, "qty": 1}]})
+j = r.get_json()
+check("a typed $2.75 is floored to $2", abs(j["discount"] - 2.0) < 0.01, str(j))
+
+r = c.post("/api/sales", json={"payment_type": "cash", "discount": 999,
+                               "items": [{"product_id": product_id("HugeTry", 30.0, 100), "qty": 1}]})
+j = r.get_json()
+check("a huge typed discount is still capped at 8% floored ($2)",
+      abs(j["discount"] - 2.0) < 0.01, str(j))
 
 print("\n== employee discount does NOT stack with manual discount ==")
 pid3 = product_id("StackTest", 50.0, 100)

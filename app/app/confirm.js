@@ -15,6 +15,7 @@ import { useCart } from '../src/lib/cart';
 import ProductImage from '../src/components/ProductImage';
 import { colors, radius, spacing, shadow } from '../src/lib/theme';
 import { L } from '../src/lib/labels';
+import PercentSlider from '../src/components/PercentSlider';
 import { api } from '../src/lib/api';
 import NfcHeaderButton from '../src/components/NfcHeaderButton';
 import { createSaleResilient, newClientRef } from '../src/lib/offline';
@@ -221,25 +222,48 @@ function PayBig({ color, emoji, label, sub, onPress, disabled, active }) {
   );
 }
 
-// Discount entry. Both % and $ are clamped to max_discount_pct of the cart —
-// and the server clamps again, so a tampered client still cannot over-discount.
+// Discount entry.
+//
+// Parth: "preselected discount of rounded lower integer with 1% -> Max
+// allocated discount (8%) with a nice slider from 1 to 8 % and also give option
+// to add flat amount but dont let employees type higher number. It should be
+// flat amounts."
+//
+// So: whole percentages on a slider, the money always rounded DOWN to a whole
+// dollar (nobody counts $1.60 off at a paan counter), and a flat-amount mode
+// whose input physically cannot exceed the cap — the digits are clamped as they
+// are typed rather than rejected afterwards. The server clamps again.
 function DiscountModal({ visible, subtotal, maxPct, onCancel, onApply }) {
   const [mode, setMode] = useState('pct');
-  const [val, setVal] = useState('');
-  const cap = round2(subtotal * maxPct / 100);
+  const [pct, setPct] = useState(1);
+  const [amt, setAmt] = useState('');
 
-  useEffect(() => { if (visible) { setVal(''); setMode('pct'); } }, [visible]);
+  // The most that may ever come off, as whole dollars.
+  const capAmount = Math.floor(subtotal * maxPct / 100);
 
-  const parsed = Math.max(0, parseFloat(val) || 0);
-  const amount = mode === 'pct' ? round2(subtotal * Math.min(parsed, maxPct) / 100) : Math.min(parsed, cap);
-  const clamped = mode === 'pct' ? parsed > maxPct : parsed > cap;
+  useEffect(() => {
+    // Open on the maximum allowed rather than 1%. Rounding down means 1% of a
+    // $20 cart is $0, so opening at 1% showed "-$0" and looked broken.
+    if (visible) { setMode('pct'); setPct(maxPct); setAmt(''); }
+  }, [visible]);
+
+  // Percent -> whole dollars, always rounded down.
+  const fromPct = Math.floor(subtotal * pct / 100);
+  const typed = Math.floor(Math.max(0, parseFloat(amt) || 0));
+  const amount = mode === 'pct' ? fromPct : Math.min(typed, capAmount);
+
+  function onTypeAmount(v) {
+    // Clamp while typing: an employee simply cannot enter more than the cap.
+    const digits = v.replace(/[^0-9]/g, '');
+    if (digits === '') return setAmt('');
+    setAmt(String(Math.min(parseInt(digits, 10), capAmount)));
+  }
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
       <View style={styles.modalBg}>
         <View style={styles.modalCard}>
           <Text style={styles.modalTitle}>{L.discount.en} / {L.discount.gu}</Text>
-          <Text style={styles.modalSub}>Max {maxPct}% = ${cap.toFixed(2)}</Text>
 
           <View style={styles.modeRow}>
             <Pressable style={[styles.modeBtn, mode === 'pct' && styles.modeBtnOn]} onPress={() => setMode('pct')}>
@@ -250,23 +274,46 @@ function DiscountModal({ visible, subtotal, maxPct, onCancel, onApply }) {
             </Pressable>
           </View>
 
-          <TextInput
-            style={styles.modalInput}
-            value={val}
-            onChangeText={setVal}
-            keyboardType="numeric"
-            placeholder={mode === 'pct' ? `0 – ${maxPct}` : `0 – ${cap.toFixed(2)}`}
-            autoFocus
-          />
-          <Text style={styles.modalPreview}>
-            −${amount.toFixed(2)}{clamped ? `  (capped at ${maxPct}%)` : ''}
+          {mode === 'pct' ? (
+            <>
+              <PercentSlider value={pct} min={1} max={maxPct} onChange={setPct} />
+              <View style={styles.scaleRow}>
+                <Text style={styles.scaleTxt}>1%</Text>
+                <Text style={styles.scaleTxt}>{maxPct}%</Text>
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={styles.modalSub}>Most you can give: ${capAmount}</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={amt}
+                onChangeText={onTypeAmount}
+                keyboardType="number-pad"
+                placeholder={`0 – ${capAmount}`}
+                placeholderTextColor={colors.textLight}
+                textAlign="center"
+                autoFocus
+              />
+            </>
+          )}
+
+          <Text style={styles.bigOff}>−${amount}</Text>
+          <Text style={styles.bigOffSub}>
+            {mode === 'pct'
+              ? `${pct}% of $${subtotal.toFixed(2)}, rounded down`
+              : `New total $${(subtotal - amount).toFixed(2)}`}
           </Text>
 
           <View style={styles.modalBtns}>
             <Pressable style={styles.modalCancel} onPress={onCancel}>
               <Text style={styles.modalCancelTxt}>{L.cancel.en}</Text>
             </Pressable>
-            <Pressable style={styles.modalOk} onPress={() => onApply(amount)}>
+            <Pressable
+              style={[styles.modalOk, amount <= 0 && { opacity: 0.4 }]}
+              onPress={() => amount > 0 && onApply(amount)}
+              disabled={amount <= 0}
+            >
               <Text style={styles.modalOkTxt}>{L.done.en}</Text>
             </Pressable>
           </View>
@@ -331,6 +378,10 @@ const styles = StyleSheet.create({
 
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
   modalCard: { width: '100%', backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.xl },
+  scaleRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: -6 },
+  scaleTxt: { fontSize: 17, fontWeight: '800', color: colors.textMuted },
+  bigOff: { fontSize: 44, fontWeight: '900', color: colors.order, marginTop: spacing.md },
+  bigOffSub: { fontSize: 18, color: colors.textMuted, marginBottom: spacing.sm },
   modalTitle: { fontSize: 20, fontWeight: '800', color: colors.text },
   modalSub: { fontSize: 18, color: colors.textMuted, marginTop: 2 },
   modeRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },

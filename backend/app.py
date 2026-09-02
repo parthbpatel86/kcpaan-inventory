@@ -105,16 +105,19 @@ def _resolve_discount(conn, d, subtotal):
         pct = _setting(conn, "employee_discount_pct", 8)
         return round(subtotal * pct / 100.0, 2)
 
-    cap = round(subtotal * _setting(conn, "max_discount_pct", 8) / 100.0, 2)
+    # Manual discounts are whole dollars, always rounded DOWN. Parth: "rounded
+    # lower integer ... It should be flat amounts." Nobody counts $1.60 off at a
+    # paan counter, and the cap is floored too so 8% of $20 gives at most $1.
+    cap = float(int(subtotal * _setting(conn, "max_discount_pct", 8) / 100.0))
     if d.get("discount_pct") is not None:
         try:
             pct = max(0.0, float(d.get("discount_pct") or 0))
         except (TypeError, ValueError):
             pct = 0.0
-        amount = round(subtotal * pct / 100.0, 2)
+        amount = float(int(subtotal * pct / 100.0))
     else:
         try:
-            amount = max(0.0, float(d.get("discount", 0) or 0))
+            amount = float(int(max(0.0, float(d.get("discount", 0) or 0))))
         except (TypeError, ValueError):
             amount = 0.0
     return round(min(amount, cap, subtotal), 2)
